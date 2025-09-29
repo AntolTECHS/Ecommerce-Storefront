@@ -9,7 +9,7 @@ const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
-// Load environment variables
+// Load env variables
 dotenv.config();
 
 // Ensure required ENV vars
@@ -17,65 +17,64 @@ if (!process.env.MONGO_URI) {
   console.error("❌ Missing MONGO_URI in .env");
   process.exit(1);
 }
-if (!process.env.FRONTEND_URL) {
-  console.warn("⚠️ FRONTEND_URL not set in .env (used for reset emails + CORS)");
-}
 
 // Connect to MongoDB
 connectDB();
 
 const app = express();
 
-// Middleware to parse JSON and URL-encoded bodies
+// Body parser middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ============== CORS SETUP ============== */
+/* ===================== CORS SETUP ===================== */
 const defaultOrigins = [
-  "http://localhost:5173", // local dev
-  "http://localhost:3000", // alt local
+  "http://localhost:5173",
+  "http://localhost:3000",
 ];
 
-// Deployed frontend on Vercel
-const vercelOrigin = "https://ecommerce-storefront-nbq8mb6df-antols-projects-6e955398.vercel.app";
+const deployedFrontends = [
+  "https://techstore18.vercel.app",
+  "https://ecommerce-storefront-nbq8mb6df-antols-projects-6e955398.vercel.app",
+];
 
 const allowedOrigins = [
   ...defaultOrigins,
-  vercelOrigin,
-  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []), // support multiple domains via env
+  ...deployedFrontends,
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []),
 ].filter(Boolean);
 
-app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        console.error("❌ CORS blocked request from:", origin);
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    credentials: true,
-  })
-);
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      console.error("❌ CORS blocked request from:", origin);
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  credentials: true,
+};
 
-// ✅ Handle all preflight requests
-app.options("*", cors());
+app.use(cors(corsOptions));
 
-/* ============== LOGGER ============== */
+// Handle preflight OPTIONS requests for all routes
+app.options("*", cors(corsOptions));
+
+/* ===================== LOGGER ===================== */
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-/* ============== UPLOADS DIR ============== */
+/* ===================== UPLOADS DIR ===================== */
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 app.use("/uploads", express.static(uploadsDir));
 
-/* ============== ROUTES ============== */
+/* ===================== ROUTES ===================== */
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -86,13 +85,7 @@ const contactRoutes = require("./routes/contactRoutes");
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
-
-// Debug log for product routes
-app.use("/api/products", (req, res, next) => {
-  console.log("📦 /api/products hit:", req.method, req.originalUrl);
-  next();
-}, productRoutes);
-
+app.use("/api/products", productRoutes);
 app.use("/api/orders", orderRoutes);
 app.use("/api/contact", contactRoutes);
 
@@ -105,13 +98,13 @@ app.get("/", (req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
-/* ============== SOCKET.IO SETUP ============== */
+/* ===================== SOCKET.IO ===================== */
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
-    methods: ["GET", "POST"],
+    methods: ["GET", "POST", "PUT", "DELETE"],
     credentials: true,
   },
 });
@@ -120,13 +113,12 @@ app.set("io", io);
 
 io.on("connection", (socket) => {
   console.log("🟢 New client connected:", socket.id);
-
   socket.on("disconnect", () => {
     console.log("🔴 Client disconnected:", socket.id);
   });
 });
 
-/* ============== START SERVER ============== */
+/* ===================== START SERVER ===================== */
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
