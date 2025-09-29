@@ -18,7 +18,7 @@ if (!process.env.MONGO_URI) {
   process.exit(1);
 }
 if (!process.env.FRONTEND_URL) {
-  console.warn("⚠️ FRONTEND_URL not set in .env (required for reset emails)");
+  console.warn("⚠️ FRONTEND_URL not set in .env (used for reset emails)");
 }
 
 // Connect to MongoDB
@@ -30,11 +30,27 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS setup (adjust origins as needed for frontend)
+/* ============== CORS SETUP ============== */
+const allowedOrigins = [
+  "http://localhost:5173", // local dev
+  "http://localhost:3000", // alt local
+  "https://ecommerce-storefront-seven.vercel.app", // production Vercel
+  "https://ecommerce-storefront-ifvd8pkhm-antols-projects-6e955398.vercel.app", // Vercel preview
+  "https://ecommerce-storefront-ojwh14g2n-antols-projects-6e955398.vercel.app", // Vercel preview
+  process.env.FRONTEND_URL, // any custom domain you add
+].filter(Boolean); // remove undefined
+
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
-    credentials: true, // allow cookies
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.error("❌ CORS blocked request from:", origin);
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
   })
 );
 
@@ -60,7 +76,7 @@ const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const contactRoutes = require("./routes/contactRoutes");
 
-app.use("/api/auth", authRoutes);       // includes register, login, forgot-password, reset-password
+app.use("/api/auth", authRoutes); // includes register, login, forgot-password, reset-password
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/products", productRoutes);
@@ -81,7 +97,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    origin: allowedOrigins,
     credentials: true,
   },
 });
