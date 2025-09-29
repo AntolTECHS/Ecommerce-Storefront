@@ -36,9 +36,14 @@ const defaultOrigins = [
   "http://localhost:3000", // alt local
 ];
 
+// Add your deployed Vercel frontend here:
+const vercelOrigin =
+  "https://ecommerce-storefront-knw9w8ygq-antols-projects-6e955398.vercel.app";
+
 const allowedOrigins = [
   ...defaultOrigins,
-  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []), // support multiple domains
+  vercelOrigin,
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []), // support multiple domains via env
 ].filter(Boolean);
 
 app.use(
@@ -52,6 +57,7 @@ app.use(
         callback(new Error("Not allowed by CORS"));
       }
     },
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     credentials: true,
   })
 );
@@ -78,7 +84,7 @@ const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const contactRoutes = require("./routes/contactRoutes");
 
-app.use("/api/auth", authRoutes); // includes register, login, forgot-password, reset-password
+app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/products", productRoutes);
@@ -100,6 +106,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
+    methods: ["GET", "POST"],
     credentials: true,
   },
 });
