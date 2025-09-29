@@ -18,11 +18,6 @@ if (!process.env.MONGO_URI) {
   console.error("❌ Missing MONGO_URI in .env");
   process.exit(1);
 }
-if (!process.env.FRONTEND_URL) {
-  console.warn(
-    "⚠️ FRONTEND_URL not set in .env. Defaulting to localhost for development."
-  );
-}
 
 // Connect to MongoDB
 connectDB();
@@ -34,10 +29,15 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS setup
+// CORS setup: allow both localhost (dev) and Vercel frontend (prod)
+const allowedOrigins = [
+  "http://localhost:5173", // local dev
+  process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production
+];
+
 app.use(
   cors({
-    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    origin: allowedOrigins,
     credentials: true,
   })
 );
@@ -85,7 +85,7 @@ const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    origin: allowedOrigins,
     credentials: true,
   },
 });
