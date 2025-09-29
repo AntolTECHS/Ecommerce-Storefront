@@ -9,7 +9,7 @@ const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
-// Load env variables
+// Load environment variables
 dotenv.config();
 
 // Ensure required ENV vars
@@ -54,12 +54,14 @@ const corsOptions = {
     }
   },
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true,
 };
 
+// Apply CORS globally
 app.use(cors(corsOptions));
 
-// Handle preflight OPTIONS requests for all routes
+// Handle preflight OPTIONS requests
 app.options("*", cors(corsOptions));
 
 /* ===================== LOGGER ===================== */
