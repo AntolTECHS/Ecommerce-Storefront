@@ -1,4 +1,4 @@
-/* ================== server.js (updated) ================== */
+/* ================== server.js (final) ================== */
 'use strict';
 
 const express = require('express');
@@ -15,22 +15,22 @@ const helmet = require('helmet');
 const connectDB = require('./config/db');
 const { notFound, errorHandler } = require('./middleware/errorMiddleware');
 
-// Load environment variables
+// Load env
 dotenv.config();
 
-// Minimal required config check
+// QUICK sanity: require MONGO_URI
 if (!process.env.MONGO_URI) {
-  console.error('❌ Missing MONGO_URI in environment');
+  console.error('❌ Missing MONGO_URI in environment. Set MONGO_URI and restart.');
   process.exit(1);
 }
 
-// Connect to MongoDB
+// Connect DB
 connectDB();
 
-// Create app
+// Express app
 const app = express();
 
-// If running behind a proxy (Heroku, nginx), enable trust proxy so secure cookies / IPs work
+// If you run behind proxies (Heroku/Render/nginx), consider enabling trust proxy
 if (process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
@@ -38,79 +38,87 @@ if (process.env.TRUST_PROXY === 'true' || process.env.NODE_ENV === 'production')
 // Security headers
 app.use(helmet());
 
-// JSON + URL-encoded body parsers (increase limit slightly for uploads via form-data if needed)
+// Body parsers
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-/* ========== CORS setup ========== */
-// allow local dev + production frontend(s)
-const frontend = process.env.FRONTEND_URL || process.env.CLIENT_URL || process.env.RESET_URL_BASE || '';
-const allowedOrigins = new Set([
-  'http://localhost:5173',
-  'http://127.0.0.1:5173',
-]);
+/* ================== CORS setup ================== */
+/* Build allowed origins set from env + common dev hosts */
+const frontendUrl = (process.env.FRONTEND_URL || process.env.CLIENT_URL || '').replace(/\/$/, '');
+const allowedOrigins = new Set(['http://localhost:5173', 'http://127.0.0.1:5173']);
+if (frontendUrl) allowedOrigins.add(frontendUrl);
 
-if (frontend) allowedOrigins.add(frontend.replace(/\/$/, ''));
-
-// dynamic origin validator so we can easily accept additional origins during dev
+// CORS options validator (won't crash if origin is undefined — allows curl/server requests)
 const corsOptions = {
-  origin: function (origin, callback) {
-    // allow requests with no origin (mobile apps, curl, server-to-server)
-    if (!origin) return callback(null, true);
-    // allow if exact match in allowedOrigins
-    if (allowedOrigins.has(origin.replace(/\/$/, ''))) return callback(null, true);
-    // also allow same-host requests (useful for some proxies)
-    if (origin.includes('localhost') || origin.includes('127.0.0.1')) return callback(null, true);
-    const msg = `CORS policy: origin ${origin} not allowed`;
-    console.warn(msg);
-    return callback(new Error(msg), false);
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // allow server-to-server, mobile, curl
+    const o = origin.replace(/\/$/, '');
+    if (allowedOrigins.has(o)) return callback(null, true);
+    if (o.includes('localhost') || o.includes('127.0.0.1')) return callback(null, true);
+    console.warn(`[CORS] blocked origin: ${origin}`);
+    return callback(new Error(`CORS policy: origin ${origin} not allowed`), false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
 };
 
+// Register CORS globally
 app.use(cors(corsOptions));
 
-// --- SAFER preflight handling (avoids registering app.options('*', ...))
-// Some path-to-regexp / express versions choke on '*' when used in route registration.
-// Instead of app.options('*', cors(corsOptions)) we handle OPTIONS at middleware level.
+/* SAFER preflight handling:
+   Some express/path-to-regexp combos can choke on app.options('*', ...) - avoid calling that.
+   Instead, handle preflight via a small middleware that runs CORS for OPTIONS requests. */
 app.use((req, res, next) => {
   if (req.method === 'OPTIONS') {
-    // run CORS middleware for preflight, then end the response if headers were set
+    // Run CORS for preflight — this will set appropriate headers
     return cors(corsOptions)(req, res, next);
   }
   next();
 });
 
-/* ========== Logging ========== */
+/* ================== Logging ================== */
 if (process.env.NODE_ENV === 'development') {
   app.use(morgan('dev'));
 }
 
-/* ========== Rate limiting (global mild protection) ========== */
+/* ================== Rate limiting (global mild protection) ================== */
 const globalLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
-  max: 200, // maximum requests per IP per window
+  max: 200,
   standardHeaders: true,
   legacyHeaders: false,
 });
 app.use(globalLimiter);
 
-/* ========== Uploads static dir ========== */
+/* ================== Uploads folder (static) ================== */
 const uploadsDir = path.join(__dirname, 'uploads');
 try {
   fs.mkdirSync(uploadsDir, { recursive: true });
-} catch (e) {
-  console.warn('Could not ensure uploads dir:', e.message || e);
+} catch (err) {
+  console.warn('[startup] could not ensure uploads dir:', err && err.message ? err.message : err);
 }
-app.use('/uploads', express.static(uploadsDir));
 
-/* ========== Helpful startup diagnostics for mail & frontend config ========== */
+// Ensure CORS headers are present for /uploads responses even on 404s.
+// This middleware sets CORS headers for the uploads route before express.static handles it.
+app.use('/uploads', (req, res, next) => {
+  // Set Access-Control-Allow-Origin for browsers (match frontend if available)
+  const allow = frontendUrl || '*';
+  res.setHeader('Access-Control-Allow-Origin', allow);
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
+  // Allow other preflight headers as needed
+  res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
+  next();
+});
+
+// Serve static uploads (files should exist on disk OR be uploaded via your admin/product handlers)
+app.use('/uploads', express.static(uploadsDir, { extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }));
+
+/* ================== Startup diagnostics (mail + frontend) ================== */
 (function startupChecks() {
-  if (!frontend) {
-    console.warn('[startup] FRONTEND_URL / CLIENT_URL / RESET_URL_BASE is not set; reset links may point to localhost.');
+  if (!frontendUrl) {
+    console.warn('[startup] FRONTEND_URL / CLIENT_URL not set. Reset links may point to localhost.');
   } else {
-    console.info('[startup] FRONTEND_URL =', frontend);
+    console.info('[startup] FRONTEND_URL =', frontendUrl);
   }
 
   const hasSendGrid = Boolean(process.env.SENDGRID_API_KEY);
@@ -119,16 +127,17 @@ app.use('/uploads', express.static(uploadsDir));
   if (!hasSendGrid && !hasSMTP) {
     console.warn('[startup] No mail provider configured (SENDGRID_API_KEY or SMTP_HOST/SMTP_USER/SMTP_PASS). Password reset emails will fail.');
   } else {
-    if (hasSendGrid) console.info('[startup] SendGrid API key detected - using SendGrid where configured.');
-    if (hasSMTP) console.info('[startup] SMTP settings detected - Nodemailer will attempt SMTP send.');
+    if (hasSendGrid) console.info('[startup] SendGrid API key detected - SendGrid will be used when configured.');
+    if (hasSMTP) console.info('[startup] SMTP credentials detected - Nodemailer will attempt SMTP send.');
   }
 
   if (!process.env.FROM_EMAIL) {
-    console.warn('[startup] FROM_EMAIL not set - using fallback no-reply address.');
+    console.warn('[startup] FROM_EMAIL not set - emails will use fallback no-reply address.');
   }
 })();
 
-/* ========== ROUTES (mount) ========== */
+/* ================== Mount routes ================== */
+/* NOTE: these files must exist (you provided them earlier) */
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const adminRoutes = require('./routes/adminRoutes');
@@ -143,18 +152,22 @@ app.use('/api/products', productRoutes);
 app.use('/api/orders', orderRoutes);
 app.use('/api/contact', contactRoutes);
 
-// Root health-check
+// Health check / root
 app.get('/', (req, res) => res.send('API is running...'));
 
-/* ========== Error middleware ========== */
+/* ================== Error handlers ================== */
 app.use(notFound);
 app.use(errorHandler);
 
-/* ========== Socket.IO ========== */
+/* ================== Socket.IO ================== */
 const server = http.createServer(app);
+
+// Build Socket.IO cors origins array from allowedOrigins set
+const ioOrigins = Array.from(allowedOrigins).map(String);
+
 const io = new Server(server, {
   cors: {
-    origin: Array.from(new Set([...allowedOrigins])).map(s => String(s)),
+    origin: ioOrigins,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   },
@@ -167,6 +180,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => console.log('🔴 Socket disconnected:', socket.id));
 });
 
-/* ========== Start server ========== */
+/* ================== Start server ================== */
 const PORT = Number(process.env.PORT || 5000);
 server.listen(PORT, () => console.log(`🚀 Server listening on port ${PORT}`));
