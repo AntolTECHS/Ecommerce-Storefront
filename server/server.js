@@ -70,7 +70,17 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // preflight
+
+// --- SAFER preflight handling (avoids registering app.options('*', ...))
+// Some path-to-regexp / express versions choke on '*' when used in route registration.
+// Instead of app.options('*', cors(corsOptions)) we handle OPTIONS at middleware level.
+app.use((req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    // run CORS middleware for preflight, then end the response if headers were set
+    return cors(corsOptions)(req, res, next);
+  }
+  next();
+});
 
 /* ========== Logging ========== */
 if (process.env.NODE_ENV === 'development') {
