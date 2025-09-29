@@ -18,7 +18,7 @@ if (!process.env.MONGO_URI) {
   process.exit(1);
 }
 if (!process.env.FRONTEND_URL) {
-  console.warn("⚠️ FRONTEND_URL not set in .env (used for reset emails)");
+  console.warn("⚠️ FRONTEND_URL not set in .env (used for reset emails + CORS)");
 }
 
 // Connect to MongoDB
@@ -31,18 +31,20 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 /* ============== CORS SETUP ============== */
-const allowedOrigins = [
+const defaultOrigins = [
   "http://localhost:5173", // local dev
   "http://localhost:3000", // alt local
-  "https://ecommerce-storefront-seven.vercel.app", // production Vercel
-  "https://ecommerce-storefront-ifvd8pkhm-antols-projects-6e955398.vercel.app", // Vercel preview
-  "https://ecommerce-storefront-ojwh14g2n-antols-projects-6e955398.vercel.app", // Vercel preview
-  process.env.FRONTEND_URL, // any custom domain you add
-].filter(Boolean); // remove undefined
+];
+
+const allowedOrigins = [
+  ...defaultOrigins,
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []), // support multiple domains
+].filter(Boolean);
 
 app.use(
   cors({
     origin: function (origin, callback) {
+      // Allow requests with no origin (mobile apps, Postman, curl)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -117,4 +119,5 @@ io.on("connection", (socket) => {
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
+  console.log("✅ Allowed Origins:", allowedOrigins);
 });
