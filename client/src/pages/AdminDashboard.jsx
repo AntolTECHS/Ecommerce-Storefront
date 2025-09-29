@@ -23,8 +23,6 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { useToast } from "@/hooks/use-toast.js";
-// Optional: enable realtime by installing socket.io-client and uncommenting
-// import { io } from "socket.io-client";
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
@@ -37,15 +35,16 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Add product form state (kept)
+  // Add product form state
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [category, setCategory] = useState("");
   const [stock, setStock] = useState("");
   const [description, setDescription] = useState("");
-  const [images, setImages] = useState([]); // will be Array<File>
+  const [images, setImages] = useState([]); // Array<File>
+  const addFileInputRef = useRef(null);
 
-  // Edit modal state (kept)
+  // Edit modal state
   const [editingProduct, setEditingProduct] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editName, setEditName] = useState("");
@@ -54,22 +53,20 @@ export default function AdminDashboard() {
   const [editStock, setEditStock] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editExistingImages, setEditExistingImages] = useState([]);
-  const [editNewImages, setEditNewImages] = useState([]); // will be Array<File>
-
-  const addFileInputRef = useRef(null);
+  const [editNewImages, setEditNewImages] = useState([]); // Array<File>
   const editFileInputRef = useRef(null);
 
   const navigate = useNavigate();
   const mountedRef = useRef(true);
   const { toast } = useToast();
 
-  // Backend base URL (set via Vite env)
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").replace(/\/$/, "");
+  // Prefer explicit env var name(s), otherwise fall back to current frontend origin.
+  const _envBase = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
+  const inferredBase = (typeof window !== "undefined" && window.location?.origin) ? window.location.origin : "http://localhost:5000";
+  const API_BASE = _envBase || inferredBase;
+
   // Poll interval (ms) - configurable via env VITE_ADMIN_POLL_INTERVAL_MS
   const POLL_INTERVAL = Number(import.meta.env.VITE_ADMIN_POLL_INTERVAL_MS || 10000);
-
-  // For optional sockets (uncomment import above and this block if you have socket.io-client installed)
-  const socketRef = useRef(null);
 
   // Preview modal for message
   const [previewMessage, setPreviewMessage] = useState(null);
@@ -94,7 +91,7 @@ export default function AdminDashboard() {
         return URL.createObjectURL(img);
       }
     } catch (e) {
-      // ignore blob problems
+      // ignore
     }
 
     // String values
@@ -102,19 +99,10 @@ export default function AdminDashboard() {
       const s = img.trim();
       if (!s) return "/placeholder.png";
 
-      // absolute http(s)
       if (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//")) return s;
-
-      // already starts with slash -> /uploads/...
       if (s.startsWith("/")) return `${API_BASE}${s}`;
-
-      // common backend returns "uploads/filename.jpg" (no leading slash)
       if (/^uploads[\\/]/i.test(s)) return `${API_BASE}/${s.replace(/^\/+/, "")}`;
-
-      // sometimes backend returns just 'filename.jpg' or 'uploads\\file.jpg'
-      if (!s.includes("://")) {
-        return `${API_BASE}/${s.replace(/^\/+/, "")}`;
-      }
+      if (!s.includes("://")) return `${API_BASE}/${s.replace(/^\/+/, "")}`;
 
       return s;
     }
@@ -143,7 +131,7 @@ export default function AdminDashboard() {
     return "/placeholder.png";
   };
 
-  // Build a map of products by id for fast lookup (helps when order.product is just an id)
+  // Build a map of products by id for fast lookup
   const productsById = useMemo(() => {
     const map = new Map();
     if (Array.isArray(products)) {
@@ -283,43 +271,7 @@ export default function AdminDashboard() {
     };
   }, [POLL_INTERVAL, toast]);
 
-  // ---------- Optional: WebSocket (Socket.IO) realtime ----------
-  // To enable: install socket.io-client and uncomment the import at top.
-  // This will keep the messages/users/orders in sync instantly.
-  useEffect(() => {
-    // if you want, enable sockets by uncommenting import and this block
-    // const token = localStorage.getItem("token");
-    // if (!token) return;
-    // try {
-    //   const socket = io(API_BASE, { auth: { token } });
-    //   socketRef.current = socket;
-    //   socket.on("connect", () => console.debug("socket connected", socket.id));
-    //   socket.on("messageCreated", (msg) => {
-    //     setMessages(prev => {
-    //       const already = Array.isArray(prev) && prev.find(m => String(m._id || m.id) === String(msg._id || msg.id));
-    //       if (already) return prev;
-    //       if (toast) toast({ title: "New message", description: msg?.subject || "You have a new message" });
-    //       return [msg, ...(Array.isArray(prev) ? prev : [])];
-    //     });
-    //   });
-    //   socket.on("messageDeleted", ({ id }) => {
-    //     setMessages(prev => (Array.isArray(prev) ? prev.filter(m => String(m._id || m.id) !== String(id)) : prev));
-    //   });
-    //   socket.on("userDeleted", ({ id }) => {
-    //     setUsers(prev => (Array.isArray(prev) ? prev.filter(u => String(u._id || u.id) !== String(id)) : prev));
-    //   });
-    //   socket.on("orderDeleted", ({ id }) => {
-    //     setOrders(prev => (Array.isArray(prev) ? prev.filter(o => String(o._id || o.id) !== String(id)) : prev));
-    //   });
-    //   socket.on("disconnect", (reason) => console.debug("socket disconnected", reason));
-    // } catch (e) {
-    //   console.debug("Socket init error", e);
-    // }
-    // return () => socketRef.current?.disconnect();
-  }, [API_BASE, toast]);
-
   // --- Admin actions ---------------------------------------------------------
-
   const handleDeleteMessage = async (id) => {
     if (!id) return;
     if (!window.confirm("Delete this message? This action is irreversible.")) return;
@@ -364,7 +316,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- Product handlers (unchanged) ---
+  // --- Product handlers ---
   const handleAddProduct = async () => {
     const imagesCount = images?.length ?? 0;
     if (!name || !price || !category || !stock || imagesCount === 0) {
@@ -747,7 +699,6 @@ export default function AdminDashboard() {
                       </ul>
                     </div>
 
-                    {/* Responsive actions: wrap on small screens and align to the right on larger screens */}
                     <div className="mt-4 flex flex-wrap items-center gap-2 justify-end">
                       <Button onClick={() => handleViewOrder(order._id)} className="w-full sm:w-auto px-3 py-2 text-sm">View</Button>
                       <Button onClick={() => handleDeleteOrder(order._id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-red-600 text-white">Delete</Button>
@@ -866,7 +817,7 @@ export default function AdminDashboard() {
               </CardContent>
             </Card>
 
-            {/* Product Grid (kept) */}
+            {/* Product Grid */}
             {products.length === 0 ? <p className="text-center text-gray-500">No products available.</p> : (
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {products.map((p) => (
@@ -964,7 +915,7 @@ export default function AdminDashboard() {
         {renderTabContent()}
       </main>
 
-      {/* Edit Modal (same UI as before) */}
+      {/* Edit Modal */}
       {showEditModal && editingProduct && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
