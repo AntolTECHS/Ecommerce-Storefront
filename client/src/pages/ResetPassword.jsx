@@ -1,5 +1,4 @@
-// src/pages/ResetPassword.jsx
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -10,33 +9,9 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff } from "lucide-react"; // 👈 icons
 import API from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
-
-/**
- * Client-side password validator that mirrors server rules in
- * server/controllers/authController.js (keeps UX consistent).
- */
-const validatePassword = (password) => {
-  const minLength = 8;
-  if (!password || password.length < minLength) {
-    return `Password must be at least ${minLength} characters long.`;
-  }
-  if (!/[A-Z]/.test(password)) {
-    return "Password must include at least one uppercase letter.";
-  }
-  if (!/[a-z]/.test(password)) {
-    return "Password must include at least one lowercase letter.";
-  }
-  if (!/[0-9]/.test(password)) {
-    return "Password must include at least one number.";
-  }
-  if (!/[!@#$%^&*(),.?\":{}|<>]/.test(password)) {
-    return "Password must include at least one special character.";
-  }
-  return null;
-};
 
 export default function ResetPassword() {
   const { token } = useParams();
@@ -48,87 +23,45 @@ export default function ResetPassword() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [inlineError, setInlineError] = useState("");
-
-  // Abort controller ref so we can cancel requests on unmount
-  const abortRef = useRef(null);
-
-  useEffect(() => {
-    return () => {
-      if (abortRef.current) {
-        try {
-          abortRef.current.abort();
-        } catch (e) {
-          // ignore
-        }
-      }
-    };
-  }, []);
-
-  // NOTE: If your API service (src/services/api) already includes "/api" in baseURL,
-  // keep the path below as "/auth/reset-password/:token".
-  // If your API base DOES NOT include "/api", use "/api/auth/reset-password/:token".
-  const apiPath = `/auth/reset-password/${token}`;
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
-    setInlineError("");
 
-    if (!token) {
-      setInlineError("Missing or invalid reset link.");
-      toast({ title: "Invalid link", description: "Missing reset token", variant: "destructive" });
+    if (!password || password.length < 6) {
+      toast({
+        title: "Password too short",
+        description: "Use at least 6 characters",
+        variant: "destructive",
+      });
       return;
     }
-
-    // client-side validation that matches server rules
-    const pwError = validatePassword(password);
-    if (pwError) {
-      setInlineError(pwError);
-      toast({ title: pwError, variant: "destructive" });
-      return;
-    }
-
     if (password !== confirm) {
-      setInlineError("Passwords do not match.");
       toast({ title: "Passwords do not match", variant: "destructive" });
+      return;
+    }
+    if (!token) {
+      toast({
+        title: "Invalid link",
+        description: "Missing reset token",
+        variant: "destructive",
+      });
       return;
     }
 
     setLoading(true);
-
-    // abort previous request if any
-    if (abortRef.current) {
-      try {
-        abortRef.current.abort();
-      } catch (e) {}
-    }
-    const controller = new AbortController();
-    abortRef.current = controller;
-
     try {
-      await API.post(apiPath, { password }, { signal: controller.signal });
-
+      await API.post(`/auth/reset-password/${token}`, { password });
       toast({
         title: "Password reset",
         description: "You can now log in with your new password.",
       });
-
-      // navigate to login after success
       navigate("/login");
     } catch (err) {
-      // handle abort separately
-      if (err?.name === "CanceledError" || err?.name === "AbortError") {
-        console.debug("Reset password request aborted");
-        return;
-      }
-
-      console.error("Reset password error:", err?.response?.data || err?.message || err);
-
-      const serverMsg = err?.response?.data?.message;
-      setInlineError(serverMsg || "Token may be invalid or expired.");
+      console.error("Reset password error:", err?.response?.data || err.message);
       toast({
         title: "Reset failed",
-        description: serverMsg || "Token may be invalid or expired.",
+        description:
+          err?.response?.data?.message || "Token may be invalid or expired.",
         variant: "destructive",
       });
     } finally {
@@ -139,13 +72,17 @@ export default function ResetPassword() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-white px-4">
       <Card className="w-full max-w-md bg-gray-100 shadow-xl animate-fade">
-        <form onSubmit={handleSubmit} className="space-y-6" noValidate>
+        <form onSubmit={handleSubmit} className="space-y-6">
           <CardHeader>
-            <CardTitle className="text-center text-2xl font-bold">Reset Password</CardTitle>
+            <CardTitle className="text-center text-2xl font-bold">
+              Reset Password
+            </CardTitle>
           </CardHeader>
 
           <CardContent className="space-y-4">
-            <p className="text-sm text-gray-600">Set a new password for your account.</p>
+            <p className="text-sm text-gray-600">
+              Set a new password for your account.
+            </p>
 
             {/* New Password with toggle */}
             <div className="relative">
@@ -156,13 +93,11 @@ export default function ResetPassword() {
                 onChange={(e) => setPassword(e.target.value)}
                 aria-label="New password"
                 required
-                minLength={8}
               />
               <button
                 type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
-                onClick={() => setShowPassword((s) => !s)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                onClick={() => setShowPassword(!showPassword)}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
@@ -177,26 +112,14 @@ export default function ResetPassword() {
                 onChange={(e) => setConfirm(e.target.value)}
                 aria-label="Confirm new password"
                 required
-                minLength={8}
               />
               <button
                 type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
-                onClick={() => setShowConfirm((s) => !s)}
-                aria-label={showConfirm ? "Hide confirm password" : "Show confirm password"}
+                onClick={() => setShowConfirm(!showConfirm)}
               >
                 {showConfirm ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
-            </div>
-
-            {inlineError && (
-              <div role="alert" className="text-sm text-red-600">
-                {inlineError}
-              </div>
-            )}
-
-            <div className="text-xs text-gray-500">
-              Password must be at least 8 characters and include upper &amp; lower case letters, a number, and a special character.
             </div>
           </CardContent>
 
