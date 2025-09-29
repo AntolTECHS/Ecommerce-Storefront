@@ -2,44 +2,103 @@ const express = require("express");
 const dotenv = require("dotenv");
 const morgan = require("morgan");
 const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
+const http = require("http");
+const { Server } = require("socket.io");
 const connectDB = require("./config/db");
 const { notFound, errorHandler } = require("./middleware/errorMiddleware");
 
-// Load env variables
+// Load environment variables
 dotenv.config();
+
+// Ensure required ENV vars
+if (!process.env.MONGO_URI) {
+  console.error("❌ Missing MONGO_URI in .env");
+  process.exit(1);
+}
+if (!process.env.FRONTEND_URL) {
+  console.warn("⚠️ FRONTEND_URL not set in .env (required for reset emails)");
+}
 
 // Connect to MongoDB
 connectDB();
 
 const app = express();
 
-// Middleware
+// Middleware to parse JSON and URL-encoded bodies
 app.use(express.json());
-app.use(cors());
+app.use(express.urlencoded({ extended: true }));
 
+// CORS setup (adjust origins as needed for frontend)
+app.use(
+  cors({
+    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    credentials: true, // allow cookies
+  })
+);
+
+// Logger (only in development mode)
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Routes
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+// Serve uploaded files (static)
+app.use("/uploads", express.static(uploadsDir));
+
+/* ============== ROUTES ============== */
 const authRoutes = require("./routes/authRoutes");
-// const productRoutes = require("./routes/productRoutes");
-// const orderRoutes = require("./routes/orderRoutes");
+const userRoutes = require("./routes/userRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const productRoutes = require("./routes/productRoutes");
+const orderRoutes = require("./routes/orderRoutes");
+const contactRoutes = require("./routes/contactRoutes");
 
-app.use("/api/auth", authRoutes);
-// app.use("/api/products", productRoutes);
-// app.use("/api/orders", orderRoutes);
+app.use("/api/auth", authRoutes);       // includes register, login, forgot-password, reset-password
+app.use("/api/users", userRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/products", productRoutes);
+app.use("/api/orders", orderRoutes);
+app.use("/api/contact", contactRoutes);
 
+// Root route
 app.get("/", (req, res) => {
   res.send("API is running...");
 });
 
-// Error Middleware
+// Error middleware
 app.use(notFound);
 app.use(errorHandler);
 
-const PORT = process.env.PORT || 5000;
+/* ============== SOCKET.IO SETUP ============== */
+const server = http.createServer(app);
 
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
+const io = new Server(server, {
+  cors: {
+    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    credentials: true,
+  },
+});
+
+// Make io accessible in controllers
+app.set("io", io);
+
+io.on("connection", (socket) => {
+  console.log("🟢 New client connected:", socket.id);
+
+  socket.on("disconnect", () => {
+    console.log("🔴 Client disconnected:", socket.id);
+  });
+});
+
+/* ============== START SERVER ============== */
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
 });
