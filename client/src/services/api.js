@@ -1,10 +1,14 @@
 // src/services/api.js
 import axios from "axios";
 
+// Prefer VITE_API_URL but also accept VITE_API_BASE_URL
+const rawBaseUrl =
+  import.meta.env.VITE_API_URL ||
+  import.meta.env.VITE_API_BASE_URL ||
+  "http://localhost:5000";
+
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL
-    ? `${import.meta.env.VITE_API_BASE_URL.replace(/\/$/, "")}/api`
-    : "http://localhost:5000/api",
+  baseURL: `${rawBaseUrl.replace(/\/$/, "")}/api`,
   withCredentials: true, // optional if you use cookies
 });
 
@@ -22,7 +26,6 @@ if (API.defaults.headers) {
 function logFormData(fd) {
   if (process.env.NODE_ENV !== "development") return;
   try {
-    // Build a small preview (don't stringify blobs)
     const entries = [];
     for (const pair of fd.entries()) {
       const [k, v] = pair;
@@ -43,18 +46,14 @@ API.interceptors.request.use(
   (config) => {
     try {
       const data = config.data;
-      // Detect FormData
       if (typeof FormData !== "undefined" && data instanceof FormData) {
-        // Remove Content-Type so axios/browser will set multipart boundary correctly
         if (config.headers) {
           delete config.headers["Content-Type"];
           delete config.headers.common;
-          // keep Authorization etc. intact
         }
         logFormData(data);
       }
     } catch (err) {
-      // don't block request on logging errors
       console.debug("[API] request interceptor error:", err);
     }
     return config;
@@ -72,7 +71,11 @@ API.interceptors.response.use(
   },
   (err) => {
     if (process.env.NODE_ENV === "development") {
-      console.error("[API] response error:", err?.response?.status, err?.response?.data || err.message);
+      console.error(
+        "[API] response error:",
+        err?.response?.status,
+        err?.response?.data || err.message
+      );
     }
     return Promise.reject(err);
   }
