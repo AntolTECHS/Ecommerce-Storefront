@@ -36,9 +36,8 @@ const defaultOrigins = [
   "http://localhost:3000", // alt local
 ];
 
-// Add your deployed Vercel frontend here:
-const vercelOrigin =
-  "https://techstore18.vercel.app";
+// Deployed frontend on Vercel
+const vercelOrigin = "https://techstore18.vercel.app";
 
 const allowedOrigins = [
   ...defaultOrigins,
@@ -49,7 +48,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (mobile apps, Postman, curl)
       if (!origin || allowedOrigins.includes(origin)) {
         callback(null, true);
       } else {
@@ -62,18 +60,19 @@ app.use(
   })
 );
 
-// Logger (only in development mode)
+// ✅ Handle all preflight requests
+app.options("*", cors());
+
+/* ============== LOGGER ============== */
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-// Ensure uploads directory exists
+/* ============== UPLOADS DIR ============== */
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
-
-// Serve uploaded files (static)
 app.use("/uploads", express.static(uploadsDir));
 
 /* ============== ROUTES ============== */
@@ -87,7 +86,13 @@ const contactRoutes = require("./routes/contactRoutes");
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
-app.use("/api/products", productRoutes);
+
+// Debug log for product routes
+app.use("/api/products", (req, res, next) => {
+  console.log("📦 /api/products hit:", req.method, req.originalUrl);
+  next();
+}, productRoutes);
+
 app.use("/api/orders", orderRoutes);
 app.use("/api/contact", contactRoutes);
 
@@ -111,7 +116,6 @@ const io = new Server(server, {
   },
 });
 
-// Make io accessible in controllers
 app.set("io", io);
 
 io.on("connection", (socket) => {
