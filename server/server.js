@@ -17,66 +17,42 @@ if (!process.env.MONGO_URI) {
   console.error("❌ Missing MONGO_URI in .env");
   process.exit(1);
 }
+if (!process.env.FRONTEND_URL) {
+  console.warn("⚠️ FRONTEND_URL not set in .env (required for reset emails)");
+}
 
 // Connect to MongoDB
 connectDB();
 
 const app = express();
 
-// Body parser middleware
+// Middleware to parse JSON and URL-encoded bodies
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ===================== CORS SETUP ===================== */
-const defaultOrigins = [
-  "http://localhost:5173",
-  "http://localhost:3000",
-];
+// CORS setup (adjust origins as needed for frontend)
+app.use(
+  cors({
+    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
+    credentials: true, // allow cookies
+  })
+);
 
-const deployedFrontends = [
-  "https://techstore18.vercel.app",
-  "https://ecommerce-storefront-nbq8mb6df-antols-projects-6e955398.vercel.app",
-];
-
-const allowedOrigins = [
-  ...defaultOrigins,
-  ...deployedFrontends,
-  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(",") : []),
-].filter(Boolean);
-
-const corsOptions = {
-  origin: function (origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      console.error("❌ CORS blocked request from:", origin);
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-};
-
-// Apply CORS globally
-app.use(cors(corsOptions));
-
-// Handle preflight OPTIONS requests
-app.options("*", cors(corsOptions));
-
-/* ===================== LOGGER ===================== */
+// Logger (only in development mode)
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
-/* ===================== UPLOADS DIR ===================== */
+// Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
+
+// Serve uploaded files (static)
 app.use("/uploads", express.static(uploadsDir));
 
-/* ===================== ROUTES ===================== */
+/* ============== ROUTES ============== */
 const authRoutes = require("./routes/authRoutes");
 const userRoutes = require("./routes/userRoutes");
 const adminRoutes = require("./routes/adminRoutes");
@@ -84,7 +60,7 @@ const productRoutes = require("./routes/productRoutes");
 const orderRoutes = require("./routes/orderRoutes");
 const contactRoutes = require("./routes/contactRoutes");
 
-app.use("/api/auth", authRoutes);
+app.use("/api/auth", authRoutes);       // includes register, login, forgot-password, reset-password
 app.use("/api/users", userRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/products", productRoutes);
@@ -100,29 +76,29 @@ app.get("/", (req, res) => {
 app.use(notFound);
 app.use(errorHandler);
 
-/* ===================== SOCKET.IO ===================== */
+/* ============== SOCKET.IO SETUP ============== */
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
-    methods: ["GET", "POST", "PUT", "DELETE"],
+    origin: [process.env.FRONTEND_URL || "http://localhost:5173"],
     credentials: true,
   },
 });
 
+// Make io accessible in controllers
 app.set("io", io);
 
 io.on("connection", (socket) => {
   console.log("🟢 New client connected:", socket.id);
+
   socket.on("disconnect", () => {
     console.log("🔴 Client disconnected:", socket.id);
   });
 });
 
-/* ===================== START SERVER ===================== */
+/* ============== START SERVER ============== */
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
   console.log(`🚀 Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-  console.log("✅ Allowed Origins:", allowedOrigins);
 });
