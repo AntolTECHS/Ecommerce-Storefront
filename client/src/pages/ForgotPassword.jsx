@@ -28,7 +28,11 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [cooldown, setCooldown] = useState(0); // seconds remaining to allow resend
+  const [inlineError, setInlineError] = useState("");
   const inputRef = useRef(null);
+
+  // keep a ref to the active request so we can cancel on unmount
+  const abortRef = useRef(null);
 
   useEffect(() => {
     // Focus input only when there's no prefilled email
@@ -53,33 +57,78 @@ export default function ForgotPassword() {
     return () => clearInterval(timer);
   }, [cooldown]);
 
+  // cleanup pending request on unmount
+  useEffect(() => {
+    return () => {
+      if (abortRef.current) {
+        try { abortRef.current.abort(); } catch (e) {}
+      }
+    };
+  }, []);
+
   const validateEmail = (value) => {
     if (!value) return "Please enter your email.";
     if (!EMAIL_REGEX.test(value)) return "Please enter a valid email address.";
     return null;
   };
 
+  /**
+   * NOTE ABOUT THE ENDPOINT:
+   * - If your API service (src/services/api) already uses a baseURL that includes "/api",
+   *   keep the path as "/auth/forgot-password" (this file uses that).
+   * - If your API base does NOT include "/api", but your server expects "/api/auth/forgot-password",
+   *   change the path below to "/api/auth/forgot-password".
+   */
+
   const sendReset = async (targetEmail) => {
+    setInlineError("");
     setLoading(true);
+
+    // cancel any previous request
+    if (abortRef.current) {
+      try { abortRef.current.abort(); } catch (e) {}
+    }
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
-      await API.post("/auth/forgot-password", { email: targetEmail.toLowerCase().trim() });
+      // keep path intentionally short — adjust if your API base differs (see note above)
+      await API.post(
+        "/auth/forgot-password",
+        { email: targetEmail.toLowerCase().trim() },
+        { signal: controller.signal }
+      );
 
       // UX: Show generic success (server should also be generic)
       setSent(true);
       setCooldown(60); // block resends for 60s
       toast({
         title: "If the account exists",
-        description: "We've sent password reset instructions if the email is registered.",
+        description:
+          "We've sent password reset instructions if the email is registered.",
       });
     } catch (err) {
-      console.error("Forgot password error:", err?.response?.data || err.message);
-      // Prefer server-supplied message when available; otherwise generic message
+      // Distinguish between aborts and real errors
+      if (err?.name === "CanceledError" || err?.name === "AbortError") {
+        console.debug("Forgot password request aborted");
+        return;
+      }
+
+      // Log useful info for production debugging (but don't expose secrets to the user)
+      console.error(
+        "Forgot password error (client):",
+        err?.response?.status,
+        err?.response?.data || err?.message || err
+      );
+
+      // prefer server-supplied message when available; otherwise generic message
+      const serverMsg = err?.response?.data?.message;
+      setInlineError(serverMsg || "Failed to send reset email. Please try again later.");
       toast({
         title: "Failed to send reset email",
-        description: err?.response?.data?.message || "Please try again later.",
+        description: serverMsg || "Please try again later.",
         variant: "destructive",
       });
-      // keep `sent` unchanged (so UI shows form again)
     } finally {
       setLoading(false);
     }
@@ -87,20 +136,23 @@ export default function ForgotPassword() {
 
   const handleSubmit = async (e) => {
     e?.preventDefault?.();
+    setInlineError("");
     const err = validateEmail(email);
     if (err) {
+      setInlineError(err);
       toast({ title: err, variant: "destructive" });
       return;
     }
 
     await sendReset(email);
-    // clear field only after a successful send so the user can resend same email if needed
-    // if you prefer to clear always: setEmail("");
+    // do not clear email on success so users can resend or correct it
   };
 
   const handleResend = async () => {
+    setInlineError("");
     const err = validateEmail(email);
     if (err) {
+      setInlineError(err);
       toast({ title: err, variant: "destructive" });
       return;
     }
@@ -137,6 +189,12 @@ export default function ForgotPassword() {
                   aria-label="Email"
                   required
                 />
+
+                {inlineError && (
+                  <div role="alert" className="text-sm text-red-600 mt-1">
+                    {inlineError}
+                  </div>
+                )}
               </>
             ) : (
               <div aria-live="polite" className="text-sm text-gray-700">
@@ -175,6 +233,7 @@ export default function ForgotPassword() {
                   onClick={() => {
                     // allow user to go back to send form (if they want to change email)
                     setSent(false);
+                    setInlineError("");
                   }}
                   className="w-full bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
                 >
