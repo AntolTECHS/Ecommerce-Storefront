@@ -53,8 +53,28 @@ if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Serve uploaded files (static)
-app.use("/uploads", express.static(uploadsDir));
+// Serve uploaded files (static) with permissive cross-origin headers
+const staticUploadsOptions = {
+  setHeaders: (res, filePath, stat) => {
+    // Use explicit frontend origin if possible (do NOT use '*' when you're using credentials)
+    const frontend = process.env.FRONTEND_URL || allowedOrigins[0] || '*';
+    res.setHeader('Access-Control-Allow-Origin', frontend);
+    // Allow browsers to embed images cross-origin
+    res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    // Allow credentials only if frontend is explicit (not '*')
+    if (frontend !== '*') {
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
+    }
+  },
+};
+
+// Optional debug middleware: uncomment to log requests to /uploads during debugging
+// app.use('/uploads', (req, res, next) => {
+//   console.log('[uploads] requested:', req.method, req.url);
+//   next();
+// }, express.static(uploadsDir, staticUploadsOptions));
+
+app.use('/uploads', express.static(uploadsDir, staticUploadsOptions));
 
 /* ================== ROUTES ================== */
 const authRoutes = require("./routes/authRoutes");

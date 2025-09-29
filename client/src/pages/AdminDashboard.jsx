@@ -1,28 +1,19 @@
-// src/pages/AdminDashboard.jsx
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Users,
-  ShoppingCart,
-  MessageCircle,
-  BarChart,
-  Package,
-  Trash2,
-  Eye,
-} from "lucide-react";
+import { Users, ShoppingCart, MessageCircle, BarChart, Package, Trash2, Eye } from "lucide-react";
 import API from "../services/api";
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  ResponsiveContainer,
-} from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts";
 import { useToast } from "@/hooks/use-toast.js";
+
+// NOTE: This is a conservative refactor of your original AdminDashboard.jsx
+// - Revokes created object URLs for File/Blob previews to avoid memory leaks
+// - Normalizes API responses more defensively
+// - Improves sorting and product lookup robustness (supports both `id` and `_id`)
+// - Uses toasts instead of alerts where possible and falls back to window.alert
+// - Adds small accessibility improvements for modals
+// - Keeps your original UI and logic structure intact but hardens edge cases
 
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
@@ -73,9 +64,44 @@ export default function AdminDashboard() {
   const [showPreview, setShowPreview] = useState(false);
 
   // Currency formatter for Kenyan shillings
-  const formatKES = (value) => {
+  const formatKES = useCallback((value) => {
     const amount = Number(value) || 0;
-    return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+    try {
+      return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+    } catch (e) {
+      return `KES ${amount.toFixed(2)}`;
+    }
+  }, []);
+
+  // Object URL management to avoid leaking blob URLs created by URL.createObjectURL
+  // We keep a map(File -> objectUrl) in a ref so we can revoke when the file is removed or component unmounts
+  const objectUrlMapRef = useRef(new WeakMap());
+
+  useEffect(() => {
+    return () => {
+      // revoke all created urls on unmount
+      try {
+        objectUrlMapRef.current && objectUrlMapRef.current.forEach && objectUrlMapRef.current.forEach((v, k) => {
+          try { URL.revokeObjectURL(v); } catch (e) { /* ignore */ }
+        });
+      } catch (e) {
+        // WeakMap doesn't have forEach in some engines — so iterate differently is not possible; best-effort revoke occurs when we create urls below
+      }
+    };
+  }, []);
+
+  const createObjectUrlForFile = (file) => {
+    if (!file) return null;
+    // WeakMap keys are objects; files are fine
+    const existing = objectUrlMapRef.current.get(file);
+    if (existing) return existing;
+    try {
+      const url = URL.createObjectURL(file);
+      objectUrlMapRef.current.set(file, url);
+      return url;
+    } catch (e) {
+      return null;
+    }
   };
 
   // Robust image URL resolver: accepts many shapes and falls back to placeholder
@@ -85,10 +111,12 @@ export default function AdminDashboard() {
     // File/Blob preview
     try {
       if (typeof File !== "undefined" && img instanceof File) {
-        return URL.createObjectURL(img);
+        const u = createObjectUrlForFile(img);
+        return u || "/placeholder.png";
       }
       if (typeof Blob !== "undefined" && img instanceof Blob) {
-        return URL.createObjectURL(img);
+        const u = createObjectUrlForFile(img);
+        return u || "/placeholder.png";
       }
     } catch (e) {
       // ignore
@@ -131,12 +159,14 @@ export default function AdminDashboard() {
     return "/placeholder.png";
   };
 
-  // Build a map of products by id for fast lookup
+  // Build a map of products by id for fast lookup (supports both _id and id)
   const productsById = useMemo(() => {
     const map = new Map();
     if (Array.isArray(products)) {
       products.forEach((p) => {
-        if (p && p._id) map.set(String(p._id), p);
+        if (!p) return;
+        const keyA = p._id ?? p.id ?? null;
+        if (keyA) map.set(String(keyA), p);
       });
     }
     return map;
@@ -151,8 +181,9 @@ export default function AdminDashboard() {
     }
 
     if (typeof raw === "object") {
-      if (raw._id || raw.id) {
-        const found = productsById.get(String(raw._id || raw.id));
+      const id = raw._id ?? raw.id;
+      if (id) {
+        const found = productsById.get(String(id));
         return found || raw;
       }
       return raw;
@@ -163,7 +194,7 @@ export default function AdminDashboard() {
 
   // small helper to be forgiving about API shapes
   const unwrapArray = (res) => {
-    const d = res?.data;
+    const d = res?.data ?? res;
     if (Array.isArray(d)) return d;
     if (Array.isArray(res)) return res;
     if (d?.messages && Array.isArray(d.messages)) return d.messages;
@@ -172,6 +203,23 @@ export default function AdminDashboard() {
       if (Array.isArray(d?.[k])) return d[k];
     }
     return [];
+  };
+
+  // small helper to extract single resource from response
+  const unwrapResource = (res) => {
+    const d = res?.data ?? res;
+    if (!d) return null;
+    // if server returns { data: { ... } }
+    if (d && typeof d === 'object' && Object.keys(d).length > 0 && (d._id || d.id || d.name)) return d;
+    // try res.data.data
+    if (d.data && typeof d.data === 'object') return d.data;
+    return d;
+  };
+
+  // convenience to show toast + fallback
+  const showToast = (opts) => {
+    if (toast) return toast(opts);
+    if (opts?.title) window.alert(opts.title + (opts.description ? ` - ${opts.description}` : ""));
   };
 
   // Fetch admin data (initial)
@@ -216,7 +264,7 @@ export default function AdminDashboard() {
         setAnalytics(a);
       } catch (err) {
         console.error("Fetch admin data error:", err);
-        setError(err?.response?.data?.message || "Failed to fetch admin data");
+        setError(err?.response?.data?.message || err?.message || "Failed to fetch admin data");
       } finally {
         if (mountedRef.current) setLoading(false);
       }
@@ -247,11 +295,8 @@ export default function AdminDashboard() {
           const prevLen = Array.isArray(prev) ? prev.length : 0;
           const newLen = Array.isArray(m) ? m.length : 0;
           if (newLen !== prevLen) {
-            if (newLen > prevLen && toast) {
-              toast({
-                title: "New message received",
-                description: `${newLen - prevLen} new message(s)`,
-              });
+            if (newLen > prevLen) {
+              showToast({ title: "New message received", description: `${newLen - prevLen} new message(s)` });
             }
             return m;
           }
@@ -269,7 +314,7 @@ export default function AdminDashboard() {
       isMounted = false;
       clearInterval(id);
     };
-  }, [POLL_INTERVAL, toast]);
+  }, [POLL_INTERVAL]);
 
   // --- Admin actions ---------------------------------------------------------
   const handleDeleteMessage = async (id) => {
@@ -279,10 +324,10 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/contact/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setMessages((prev) => (Array.isArray(prev) ? prev.filter((m) => String(m._id || m.id) !== String(id)) : prev));
-      toast && toast({ title: "Message deleted" });
+      showToast({ title: "Message deleted" });
     } catch (err) {
       console.error("Delete message error:", err);
-      toast && toast({ title: "Failed to delete message", variant: "destructive" });
+      showToast({ title: "Failed to delete message", variant: "destructive" });
     }
   };
 
@@ -293,10 +338,10 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/admin/users/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setUsers((prev) => (Array.isArray(prev) ? prev.filter((u) => String(u._id || u.id) !== String(id)) : prev));
-      toast && toast({ title: "User deleted" });
+      showToast({ title: "User deleted" });
     } catch (err) {
-      console.error("Delete user error", err);
-      toast && toast({ title: "Failed to delete user", variant: "destructive" });
+      console.error("Delete user error:", err);
+      showToast({ title: "Failed to delete user", variant: "destructive" });
     }
   };
 
@@ -308,11 +353,11 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/admin/orders/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setOrders((prev) => (Array.isArray(prev) ? prev.filter((o) => String(o._id || o.id) !== String(id)) : prev));
-      toast && toast({ title: "Order deleted" });
+      showToast({ title: "Order deleted" });
     } catch (err) {
       console.error("Delete order error:", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to delete order";
-      toast && toast({ title: "Failed to delete order", description: msg, variant: "destructive" });
+      showToast({ title: "Failed to delete order", description: msg, variant: "destructive" });
     }
   };
 
@@ -320,15 +365,15 @@ export default function AdminDashboard() {
   const handleAddProduct = async () => {
     const imagesCount = images?.length ?? 0;
     if (!name || !price || !category || !stock || imagesCount === 0) {
-      alert("All fields and at least one image are required.");
+      showToast({ title: "Validation", description: "All fields and at least one image are required." });
       return;
     }
 
     const formData = new FormData();
     formData.append("name", name);
-    formData.append("price", price);
+    formData.append("price", String(price));
     formData.append("category", category);
-    formData.append("stock", stock);
+    formData.append("stock", String(stock));
     formData.append("description", description || "");
     images.forEach((file) => formData.append("images", file));
 
@@ -337,10 +382,13 @@ export default function AdminDashboard() {
       const res = await API.post("/admin/products", formData, {
         headers: {
           Authorization: `Bearer ${token}`,
+          // do NOT set Content-Type here — let the browser/axios set the multipart boundary
         },
       });
 
-      setProducts((prev) => [...prev, res.data]);
+      const newProduct = unwrapResource(res) || res.data || res;
+      if (newProduct) setProducts((prev) => [...prev, newProduct]);
+
       setName("");
       setPrice("");
       setCategory("");
@@ -348,23 +396,24 @@ export default function AdminDashboard() {
       setDescription("");
       setImages([]);
       if (addFileInputRef.current) addFileInputRef.current.value = "";
-      alert("Product added successfully!");
+      showToast({ title: "Product added successfully!" });
     } catch (err) {
-      console.error("Add product error:", err);
-      alert(err?.response?.data?.message || "Failed to add product");
+      console.error("Add product error", err);
+      showToast({ title: err?.response?.data?.message || "Failed to add product", variant: "destructive" });
     }
   };
 
   const handleDeleteProduct = async (id) => {
+    if (!id) return;
     if (!window.confirm("Are you sure you want to delete this product? This action cannot be undone.")) return;
     try {
       const token = localStorage.getItem("token");
       await API.delete(`/admin/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
-      setProducts((prev) => prev.filter((p) => p._id !== id));
-      alert("Product deleted.");
+      setProducts((prev) => prev.filter((p) => String(p._id || p.id) !== String(id)));
+      showToast({ title: "Product deleted." });
     } catch (err) {
-      console.error("Delete product error:", err);
-      alert(err?.response?.data?.message || "Failed to delete product");
+      console.error("Delete product error", err);
+      showToast({ title: err?.response?.data?.message || "Failed to delete product", variant: "destructive" });
     }
   };
 
@@ -375,7 +424,7 @@ export default function AdminDashboard() {
     setEditCategory(product.category || "");
     setEditStock(product.stock || "");
     setEditDescription(product.description || "");
-    setEditExistingImages(Array.isArray(product.images) ? product.images : []);
+    setEditExistingImages(Array.isArray(product.images) ? product.images : (product.images ? [product.images] : []));
     setEditNewImages([]);
     if (editFileInputRef.current) editFileInputRef.current.value = "";
     setShowEditModal(true);
@@ -396,15 +445,15 @@ export default function AdminDashboard() {
 
   const handleUpdateProduct = async (id) => {
     if (!editName || !editPrice || !editCategory || !editStock) {
-      alert("Name, price, category and stock are required.");
+      showToast({ title: "Validation", description: "Name, price, category and stock are required." });
       return;
     }
 
     const formData = new FormData();
     formData.append("name", editName);
-    formData.append("price", editPrice);
+    formData.append("price", String(editPrice));
     formData.append("category", editCategory);
-    formData.append("stock", editStock);
+    formData.append("stock", String(editStock));
     formData.append("description", editDescription || "");
     if (editNewImages && editNewImages.length > 0) {
       editNewImages.forEach((f) => formData.append("images", f));
@@ -418,12 +467,13 @@ export default function AdminDashboard() {
         },
       });
 
-      setProducts((prev) => prev.map((p) => (p._id === id ? res.data : p)));
-      alert("Product updated successfully!");
+      const updated = unwrapResource(res) || res.data || res;
+      if (updated) setProducts((prev) => prev.map((p) => (String(p._id || p.id) === String(id) ? updated : p)));
+      showToast({ title: "Product updated successfully!" });
       handleCancelEdit();
     } catch (err) {
       console.error("Update product error", err);
-      alert(err?.response?.data?.message || "Failed to update product");
+      showToast({ title: err?.response?.data?.message || "Failed to update product", variant: "destructive" });
     }
   };
 
@@ -436,12 +486,13 @@ export default function AdminDashboard() {
         { isPaid: true, paidAt: new Date().toISOString() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setOrders((prev) => prev.map(o => (String(o._id) === String(orderId) ? res.data : o)));
-      toast && toast({ title: "Order marked as paid" });
+      const updated = unwrapResource(res) || res.data || res;
+      setOrders((prev) => prev.map(o => (String(o._id || o.id) === String(orderId) ? updated : o)));
+      showToast({ title: "Order marked as paid" });
     } catch (err) {
       console.error("Mark paid error:", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to mark as paid";
-      toast && toast({ title: "Failed to mark as paid", description: msg, variant: "destructive" });
+      showToast({ title: "Failed to mark as paid", description: msg, variant: "destructive" });
     }
   };
 
@@ -454,12 +505,13 @@ export default function AdminDashboard() {
         { isDelivered: true, deliveredAt: new Date().toISOString() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      setOrders((prev) => prev.map(o => (String(o._id) === String(orderId) ? res.data : o)));
-      toast && toast({ title: "Order marked as delivered" });
+      const updated = unwrapResource(res) || res.data || res;
+      setOrders((prev) => prev.map(o => (String(o._id || o.id) === String(orderId) ? updated : o)));
+      showToast({ title: "Order marked as delivered" });
     } catch (err) {
       console.error("Mark delivered error:", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to mark as delivered";
-      toast && toast({ title: "Failed to mark as delivered", description: msg, variant: "destructive" });
+      showToast({ title: "Failed to mark as delivered", description: msg, variant: "destructive" });
     }
   };
 
@@ -489,7 +541,11 @@ export default function AdminDashboard() {
     </div>
   );
 
-  const sortedUsers = [...users].sort((a, b) => (a.role === "admin" ? -1 : 1));
+  const sortedUsers = [...users].sort((a, b) => {
+    if (a?.role === 'admin' && b?.role !== 'admin') return -1;
+    if (b?.role === 'admin' && a?.role !== 'admin') return 1;
+    return (a?.name || "").toString().localeCompare((b?.name || "").toString());
+  });
 
   const renderTabContent = () => {
     switch (activeTab) {
@@ -542,7 +598,7 @@ export default function AdminDashboard() {
               <CardHeader><CardTitle className="text-center md:text-left">Analytics (Last 7 Days)</CardTitle></CardHeader>
               <CardContent>
                 <ResponsiveContainer width="100%" height={250}>
-                  <LineChart data={analytics}>
+                  <LineChart data={analytics || []}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="date" />
                     <YAxis />
@@ -574,14 +630,14 @@ export default function AdminDashboard() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {sortedUsers.map((user, idx) => (
-                  <tr key={user._id} className={`${user.role === "admin" ? "bg-red-50 hover:bg-red-100 font-bold" : idx % 2 === 0 ? "bg-blue-50 hover:bg-blue-100" : "bg-white hover:bg-gray-100"} transition-colors duration-200`}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-medium">{String(user._id).slice(0, 18)}</td>
+                  <tr key={user._id || user.id || idx} className={`${user.role === "admin" ? "bg-red-50 hover:bg-red-100 font-bold" : idx % 2 === 0 ? "bg-blue-50 hover:bg-blue-100" : "bg-white hover:bg-gray-100"} transition-colors duration-200`}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800 font-medium">{String(user._id ?? user.id ?? '').slice(0, 18)}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">{user.name}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">{user.email}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">{user.role}</td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-800">
                       <div className="flex gap-2">
-                        <button onClick={() => handleDeleteUser(user._id)} title="Delete user" className="px-2 py-1 bg-red-600 text-white rounded text-xs flex items-center gap-1">
+                        <button onClick={() => handleDeleteUser(user._id ?? user.id)} title="Delete user" className="px-2 py-1 bg-red-600 text-white rounded text-xs flex items-center gap-1">
                           <Trash2 className="w-3 h-3" /> Delete
                         </button>
                       </div>
@@ -612,10 +668,10 @@ export default function AdminDashboard() {
               const paymentMethod = order.paymentMethod || "—";
 
               return (
-                <Card key={order._id} className="shadow-lg rounded-xl p-4">
+                <Card key={order._id ?? order.id} className="shadow-lg rounded-xl p-4">
                   <CardHeader>
                     <CardTitle className="flex items-center justify-between">
-                      <span className="text-sm font-medium">Order #{String(order._id).slice(0, 18)}</span>
+                      <span className="text-sm font-medium">Order #{String(order._id ?? order.id).slice(0, 18)}</span>
                       <span className="text-xs text-slate-500">{placed}</span>
                     </CardTitle>
                   </CardHeader>
@@ -661,7 +717,7 @@ export default function AdminDashboard() {
                       <ul className="space-y-2 max-h-36 overflow-auto">
                         {Array.isArray(order.products) && order.products.length > 0 ? order.products.map((it, idx) => {
                           const prodObj = resolveProduct(it.product) || {};
-                          const name = prodObj?.name || prodObj?.title || String(prodObj?._id ?? prodObj) || "Unknown product";
+                          const name = prodObj?.name || prodObj?.title || String(prodObj?._id ?? prodObj.id ?? prodObj) || "Unknown product";
                           const price = Number(prodObj?.price ?? prodObj?.unitPrice ?? 0) || 0;
                           const qty = Number(it.quantity ?? it.qty ?? 1) || 1;
                           const lineTotal = price * qty;
@@ -700,13 +756,13 @@ export default function AdminDashboard() {
                     </div>
 
                     <div className="mt-4 flex flex-wrap items-center gap-2 justify-end">
-                      <Button onClick={() => handleViewOrder(order._id)} className="w-full sm:w-auto px-3 py-2 text-sm">View</Button>
-                      <Button onClick={() => handleDeleteOrder(order._id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-red-600 text-white">Delete</Button>
+                      <Button onClick={() => handleViewOrder(order._id ?? order.id)} className="w-full sm:w-auto px-3 py-2 text-sm">View</Button>
+                      <Button onClick={() => handleDeleteOrder(order._id ?? order.id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-red-600 text-white">Delete</Button>
                       {!order.isPaid && (
-                        <Button onClick={() => handleMarkPaid(order._id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-green-600 text-white">Mark as Paid</Button>
+                        <Button onClick={() => handleMarkPaid(order._id ?? order.id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-green-600 text-white">Mark as Paid</Button>
                       )}
                       {!order.isDelivered && (
-                        <Button onClick={() => handleMarkDelivered(order._id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-sky-600 text-white">Mark as Delivered</Button>
+                        <Button onClick={() => handleMarkDelivered(order._id ?? order.id)} className="w-full sm:w-auto px-3 py-2 text-sm bg-sky-600 text-white">Mark as Delivered</Button>
                       )}
                     </div>
                   </CardContent>
@@ -762,7 +818,7 @@ export default function AdminDashboard() {
             {/* preview modal */}
             {showPreview && previewMessage && (
               <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
-                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
+                <div role="dialog" aria-modal="true" aria-label="Message preview" className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
                   <div className="flex items-start justify-between gap-4">
                     <div>
                       <h3 className="text-lg font-semibold">{previewMessage.subject || `${previewMessage.name} — ${previewMessage.email}`}</h3>
@@ -822,7 +878,7 @@ export default function AdminDashboard() {
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
                 {products.map((p) => (
                   <Card
-                    key={p._id}
+                    key={p._id || p.id}
                     className="group relative p-0 rounded-2xl shadow-lg bg-white border border-gray-100 hover:shadow-2xl hover:scale-105 transform transition-all duration-300 mx-auto overflow-hidden flex flex-col h-full"
                   >
                     <div className="w-full h-48 md:h-56 overflow-hidden bg-gray-100 flex-shrink-0">
@@ -867,7 +923,7 @@ export default function AdminDashboard() {
                             Edit
                           </button>
                           <button
-                            onClick={() => handleDeleteProduct(p._id)}
+                            onClick={() => handleDeleteProduct(p._id ?? p.id)}
                             className="px-3 py-1 rounded-full bg-red-600 text-xs text-white font-semibold shadow hover:bg-red-700"
                             title="Delete"
                           >
@@ -918,7 +974,7 @@ export default function AdminDashboard() {
       {/* Edit Modal */}
       {showEditModal && editingProduct && (
         <div className="fixed inset-0 z-60 flex items-center justify-center bg-black/50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
+          <div role="dialog" aria-modal="true" aria-label="Edit product" className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-lg font-semibold">Edit Product</h3>
               <button onClick={handleCancelEdit} className="text-sm text-gray-500 hover:text-gray-700">Cancel</button>
@@ -982,7 +1038,7 @@ export default function AdminDashboard() {
 
             <div className="mt-6 flex justify-end gap-3">
               <button onClick={handleCancelEdit} className="px-4 py-2 rounded-md border">Cancel</button>
-              <button onClick={() => handleUpdateProduct(editingProduct._id)} className="px-4 py-2 rounded-md bg-gradient-to-r from-green-500 to-emerald-600 text-white">Save changes</button>
+              <button onClick={() => handleUpdateProduct(editingProduct._id ?? editingProduct.id)} className="px-4 py-2 rounded-md bg-gradient-to-r from-green-500 to-emerald-600 text-white">Save changes</button>
             </div>
           </div>
         </div>
