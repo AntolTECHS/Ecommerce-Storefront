@@ -29,31 +29,40 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// CORS setup: allow both localhost (dev) and Vercel frontend (prod)
+/* ================== CORS SETUP ================== */
+// Allow both local dev and production frontend
 const allowedOrigins = [
-  "http://localhost:5173", // local dev
-  process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production
+  "http://localhost:5173",           // local development
+  process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production frontend
 ];
 
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  })
-);
+// Standard CORS middleware
+app.use(cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], // include preflight methods
+}));
 
-// Logger (only in development)
+// Handle preflight OPTIONS requests
+app.options("*", cors({
+  origin: allowedOrigins,
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+}));
+
+/* ================== LOGGER ================== */
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
 
+/* ================== UPLOADS ================== */
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, "uploads");
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir, { recursive: true });
 }
 
-// Serve uploaded files (static)
+// Serve uploaded files
 app.use("/uploads", express.static(uploadsDir));
 
 /* ================== ROUTES ================== */
@@ -87,6 +96,7 @@ const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
   },
 });
 
