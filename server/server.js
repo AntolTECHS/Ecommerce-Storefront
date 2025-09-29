@@ -38,7 +38,7 @@ const defaultOrigins = [
 
 // Add your deployed Vercel frontend here:
 const vercelOrigin =
-  "https://techstore18.vercel.app/";
+  "https://techstore18.vercel.app";
 
 const allowedOrigins = [
   ...defaultOrigins,
