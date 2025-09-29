@@ -37,7 +37,7 @@ const defaultOrigins = [
 ];
 
 // Deployed frontend on Vercel
-const vercelOrigin = "https://techstore18.vercel.app";
+const vercelOrigin = "https://ecommerce-storefront-nbq8mb6df-antols-projects-6e955398.vercel.app";
 
 const allowedOrigins = [
   ...defaultOrigins,
