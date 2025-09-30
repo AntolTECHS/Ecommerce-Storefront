@@ -26,7 +26,7 @@ export default function AdminDashboard() {
       "Mobile & Wearables",
       "Audio & Entertainment",
       "Gaming",
-      "Computer Accessories & Peripherals",
+      "Computer Peripherals",
       "Smart Home & IoT",
       "Power & Charging",
       "Cameras & Imaging",
