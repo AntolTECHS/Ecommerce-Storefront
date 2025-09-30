@@ -1,4 +1,4 @@
-/* ================== SERVER.JS (fixed with CORS preflight) ================== */
+/* ================== SERVER.JS (fixed for Express 5 CORS) ================== */
 const express = require("express");
 const dotenv = require("dotenv");
 const morgan = require("morgan");
@@ -33,7 +33,7 @@ app.use(express.urlencoded({ extended: true }));
 const allowedOrigins = [
   "http://localhost:5173", // local dev
   process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production
-  // If needed, add "https://www.techstore-tau.vercel.app"
+  // Add "https://www.techstore-tau.vercel.app" if needed
 ];
 
 const corsOptions = {
@@ -52,8 +52,8 @@ const corsOptions = {
 
 // Apply global CORS
 app.use(cors(corsOptions));
-// Explicitly handle OPTIONS preflight for API routes
-app.options("/api/*", cors(corsOptions));
+// ✅ Fixed for Express 5: use RegExp instead of "/api/*"
+app.options(/^\/api\/.*$/, cors(corsOptions));
 
 /* ================== LOGGER (dev) ================== */
 if (process.env.NODE_ENV === "development") {
