@@ -1,15 +1,92 @@
 const express = require("express");
+const multer = require("multer");
+const path = require("path");
+const fs = require("fs");
 const { protect, admin } = require("../middleware/authMiddleware");
 const User = require("../models/User");
 const Order = require("../models/Order");
 const Message = require("../models/Message");
 const Login = require("../models/Login");
 const Product = require("../models/Product");
-const { cloudinary, upload } = require("../config/cloudinary");
 
 const router = express.Router();
 
-/* ============== LOGGER ============== */
+/* ============== CONFIG ============== */
+const uploadsDir = path.join(__dirname, "..", "uploads");
+fs.mkdirSync(uploadsDir, { recursive: true });
+
+const MAX_FILES = 10;
+const MAX_FILE_SIZE = 8 * 1024 * 1024; // 8 MB
+
+/* ============== MULTER ============== */
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    cb(null, uploadsDir);
+  },
+  filename: (req, file, cb) => {
+    const safeOriginal = (file.originalname || "")
+      .replace(/\s+/g, "_")
+      .replace(/[^a-zA-Z0-9_.-]/g, "");
+    const rand = Math.floor(Math.random() * 1e9);
+    cb(null, `${Date.now()}-${rand}-${safeOriginal}`);
+  },
+});
+
+function checkFileType(file) {
+  const allowedExt = /jpg|jpeg|png|gif|webp|bmp|jfif|heic|svg/;
+  const extOk = allowedExt.test(path.extname((file.originalname || "").toLowerCase()));
+  const mimeOk = !!(file.mimetype && file.mimetype.startsWith("image/"));
+  return extOk || mimeOk;
+}
+
+const upload = multer({
+  storage,
+  limits: { fileSize: MAX_FILE_SIZE },
+  fileFilter: (req, file, cb) => {
+    try {
+      if (checkFileType(file)) return cb(null, true);
+      const err = new Error("Only image files are allowed");
+      err.code = "INVALID_FILE_TYPE";
+      cb(err);
+    } catch (e) {
+      cb(e);
+    }
+  },
+});
+
+const uploadHandler = (req, res, next) => {
+  upload.array("images", MAX_FILES)(req, res, (err) => {
+    if (err) {
+      console.error("Multer error:", err);
+      return res.status(400).json({ message: err.message || "File upload failed" });
+    }
+    next();
+  });
+};
+
+/* ============== HELPERS ============== */
+const toUploadPath = (filenameOrPath) => {
+  if (!filenameOrPath || typeof filenameOrPath !== "string") return null;
+  if (filenameOrPath.startsWith("/uploads/"))
+    return path.join(uploadsDir, path.basename(filenameOrPath));
+  if (filenameOrPath.startsWith("uploads/"))
+    return path.join(uploadsDir, path.basename(filenameOrPath));
+  return path.join(uploadsDir, path.basename(filenameOrPath));
+};
+
+const safeUnlink = async (filePath) => {
+  try {
+    if (!filePath) return;
+    const resolved = path.resolve(filePath);
+    if (!resolved.startsWith(path.resolve(uploadsDir))) return;
+    await fs.promises.unlink(resolved).catch(() => {});
+  } catch (err) {
+    console.error("safeUnlink error:", err);
+  }
+};
+
+/* ============== DEBUG LOGGER ============== */
 router.use((req, res, next) => {
   console.log("[ADMIN ROUTER]", req.method, req.path);
   next();
@@ -21,7 +98,6 @@ router.get("/users", protect, admin, async (req, res) => {
     const users = await User.find().select("-password");
     res.json(users);
   } catch (err) {
-    console.error("❌ Error fetching users:", err);
     res.status(500).json({ message: "Failed to fetch users" });
   }
 });
@@ -32,7 +108,6 @@ router.get("/users/:id", protect, admin, async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
     res.json(user);
   } catch (err) {
-    console.error("❌ Error fetching user:", err);
     res.status(500).json({ message: "Failed to fetch user" });
   }
 });
@@ -43,17 +118,15 @@ router.delete("/users/:id", protect, admin, async (req, res) => {
     const user = await User.findById(userId);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    await Promise.all([
-      Order.deleteMany({ user: userId }),
-      Login.deleteMany({ user: userId }),
-      Message.deleteMany({ user: userId }),
-    ]);
+    await Order.deleteMany({ user: userId }).catch(() => {});
+    await Login.deleteMany({ user: userId }).catch(() => {});
+    await Message.deleteMany({ user: userId }).catch(() => {});
+    if (user.email) await Message.deleteMany({ email: user.email }).catch(() => {});
 
     await User.findByIdAndDelete(userId);
 
-    res.status(200).json({ message: "User and related data deleted" });
+    res.json({ message: "User and related data deleted" });
   } catch (err) {
-    console.error("❌ Error deleting user:", err);
     res.status(500).json({ message: "Failed to delete user" });
   }
 });
@@ -64,7 +137,6 @@ router.get("/orders", protect, admin, async (req, res) => {
     const orders = await Order.find();
     res.json(orders);
   } catch (err) {
-    console.error("❌ Error fetching orders:", err);
     res.status(500).json({ message: "Failed to fetch orders" });
   }
 });
@@ -73,30 +145,47 @@ router.delete("/orders/:id", protect, admin, async (req, res) => {
   try {
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: "Order not found" });
-
-    await order.deleteOne();
+    await Order.findByIdAndDelete(req.params.id);
     res.json({ message: "Order deleted" });
   } catch (err) {
-    console.error("❌ Error deleting order:", err);
     res.status(500).json({ message: "Failed to delete order" });
   }
 });
 
 router.put("/orders/:id", protect, admin, async (req, res) => {
   try {
-    const updates = req.body || {};
     const order = await Order.findById(req.params.id);
     if (!order) return res.status(404).json({ message: "Order not found" });
 
-    ["isPaid", "paidAt", "isDelivered", "deliveredAt", "status"].forEach((key) => {
-      if (updates[key] !== undefined) order[key] = updates[key];
+    const allowed = ["isPaid", "paidAt", "isDelivered", "deliveredAt", "status"];
+    Object.keys(req.body).forEach((key) => {
+      if (allowed.includes(key)) order[key] = req.body[key];
     });
 
     const saved = await order.save();
     res.json(saved);
   } catch (err) {
-    console.error("❌ Error updating order:", err);
     res.status(500).json({ message: "Failed to update order" });
+  }
+});
+
+/* ============== MESSAGE ROUTES ============== */
+router.get("/messages", protect, admin, async (req, res) => {
+  try {
+    const messages = await Message.find();
+    res.json(messages);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch messages" });
+  }
+});
+
+/* ============== LOGIN ROUTES ============== */
+router.get("/logins", protect, admin, async (req, res) => {
+  try {
+    const logins = await Login.find().populate("user", "name email role");
+    res.json(logins);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch logins" });
   }
 });
 
@@ -106,19 +195,16 @@ router.get("/products", protect, admin, async (req, res) => {
     const products = await Product.find();
     res.json(products);
   } catch (err) {
-    console.error("❌ Error fetching products:", err);
     res.status(500).json({ message: "Failed to fetch products" });
   }
 });
 
-router.post("/products", protect, admin, upload.array("images", 10), async (req, res) => {
+router.post("/products", protect, admin, uploadHandler, async (req, res) => {
   try {
     const { name, price, category, stock, description } = req.body;
     if (!name || !price || !category || !stock) {
-      return res.status(400).json({ message: "Name, price, category, and stock are required" });
+      return res.status(400).json({ message: "Missing required fields" });
     }
-
-    const images = (req.files || []).map((f) => f.path);
 
     const product = await Product.create({
       name,
@@ -126,43 +212,43 @@ router.post("/products", protect, admin, upload.array("images", 10), async (req,
       category,
       stock: Number(stock),
       description: description || "",
-      images,
+      images: (req.files || []).map((f) => `/uploads/${f.filename}`),
     });
 
     res.status(201).json(product);
   } catch (err) {
-    console.error("❌ Error creating product:", err);
-    res.status(500).json({ message: err.message || "Failed to create product" });
+    res.status(500).json({ message: "Failed to create product" });
   }
 });
 
-router.put("/products/:id", protect, admin, upload.array("images", 10), async (req, res) => {
+router.put("/products/:id", protect, admin, uploadHandler, async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: "Product not found" });
 
     const { name, price, category, stock, description } = req.body;
 
-    // delete old images from Cloudinary if new ones are uploaded
-    if (req.files && req.files.length > 0 && Array.isArray(product.images)) {
-      for (const url of product.images) {
-        const publicId = url.split("/").pop().split(".")[0]; // crude publicId extraction
-        await cloudinary.uploader.destroy(`techstore/${publicId}`);
+    if (req.files && req.files.length > 0) {
+      if (Array.isArray(product.images)) {
+        for (const imgPath of product.images) {
+          const p = toUploadPath(imgPath);
+          if (p) await safeUnlink(p);
+        }
       }
-      product.images = req.files.map((f) => f.path);
+      product.images = req.files.map((f) => `/uploads/${f.filename}`);
     }
 
-    product.name = name;
-    product.price = Number(price);
-    product.category = category;
-    product.stock = Number(stock);
-    product.description = description || "";
+    if (name) product.name = name;
+    if (price) product.price = Number(price);
+    if (category) product.category = category;
+    if (stock) product.stock = Number(stock);
+    if (description) product.description = description;
 
     const updated = await product.save();
     res.json(updated);
   } catch (err) {
     console.error("❌ Error updating product:", err);
-    res.status(500).json({ message: err.message || "Failed to update product" });
+    res.status(500).json({ message: "Failed to update product" });
   }
 });
 
@@ -172,16 +258,15 @@ router.delete("/products/:id", protect, admin, async (req, res) => {
     if (!product) return res.status(404).json({ message: "Product not found" });
 
     if (Array.isArray(product.images)) {
-      for (const url of product.images) {
-        const publicId = url.split("/").pop().split(".")[0];
-        await cloudinary.uploader.destroy(`techstore/${publicId}`);
+      for (const imgPath of product.images) {
+        const p = toUploadPath(imgPath);
+        if (p) await safeUnlink(p);
       }
     }
 
-    await product.deleteOne();
+    await Product.findByIdAndDelete(req.params.id);
     res.json({ message: "Product deleted" });
   } catch (err) {
-    console.error("❌ Error deleting product:", err);
     res.status(500).json({ message: "Failed to delete product" });
   }
 });
@@ -205,22 +290,21 @@ router.get("/analytics", protect, admin, async (req, res) => {
 
     const orders = await Order.find({ createdAt: { $gte: last7Days } });
     orders.forEach((order) => {
-      const key = formatDate(order.createdAt);
-      if (analyticsMap[key]) {
-        analyticsMap[key].orders++;
-        analyticsMap[key].revenue += order.totalPrice || 0;
+      const dateKey = formatDate(order.createdAt);
+      if (analyticsMap[dateKey]) {
+        analyticsMap[dateKey].orders++;
+        analyticsMap[dateKey].revenue += order.totalPrice || 0;
       }
     });
 
     const logins = await Login.find({ createdAt: { $gte: last7Days } });
     logins.forEach((login) => {
-      const key = formatDate(login.createdAt);
-      if (analyticsMap[key]) analyticsMap[key].logins++;
+      const dateKey = formatDate(login.createdAt);
+      if (analyticsMap[dateKey]) analyticsMap[dateKey].logins++;
     });
 
     res.json(Object.values(analyticsMap));
   } catch (err) {
-    console.error("❌ Error fetching analytics:", err);
     res.status(500).json({ message: "Failed to fetch analytics" });
   }
 });
