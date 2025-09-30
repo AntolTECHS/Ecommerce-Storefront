@@ -1,4 +1,5 @@
 // src/pages/Index.jsx (search bar sticky, Reset button removed — X inside search clears the query)
+// Updated: supports VITE_API_URL or VITE_API_BASE_URL, upgrades http image URLs to https and guarantees API_BASE uses https when possible
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -127,7 +128,13 @@ const Index = () => {
   }, [cartItems]);
 
   // Backend base URL (for images returned as relative paths)
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").replace(/\/$/, "");
+  // Prefer VITE_API_URL, fall back to VITE_API_BASE_URL, then localhost.
+  // Ensure we upgrade http: -> https: to avoid mixed-content.
+  const rawApiBase =
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_API_BASE_URL ||
+    "http://localhost:5000";
+  const API_BASE = String(rawApiBase).replace(/^http:\/\//, "https://").replace(/\/$/, "");
 
   // Currency formatter for Kenyan shillings
   const formatKES = (value) => {
@@ -142,7 +149,9 @@ const Index = () => {
     if (!img) return "/placeholder.png";
 
     if (typeof img === "string") {
-      if (img.startsWith("http") || img.startsWith("//")) return img;
+      // upgrade insecure http URLs to https to avoid mixed-content errors
+      if (img.startsWith("http://")) return img.replace(/^http:\/\//, "https://");
+      if (img.startsWith("https://") || img.startsWith("//")) return img;
       if (img.startsWith("/")) return `${API_BASE}${img}`;
       return `${API_BASE}/${img.replace(/^\/+/, "")}`;
     }
@@ -151,7 +160,8 @@ const Index = () => {
       const url = img.url || img.path || img.filename;
       if (!url) return "/placeholder.png";
       if (typeof url === "string") {
-        if (url.startsWith("http") || url.startsWith("//")) return url;
+        if (url.startsWith("http://")) return url.replace(/^http:\/\//, "https://");
+        if (url.startsWith("https://") || url.startsWith("//")) return url;
         if (url.startsWith("/")) return `${API_BASE}${url}`;
         return `${API_BASE}/${String(url).replace(/^\/+/, "")}`;
       }
