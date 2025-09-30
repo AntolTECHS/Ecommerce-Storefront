@@ -7,14 +7,7 @@ import API from "../services/api";
 import { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } from "recharts";
 import { useToast } from "@/hooks/use-toast.js";
 
-// NOTE: This is a conservative refactor of your original AdminDashboard.jsx
-// - Revokes created object URLs for File/Blob previews to avoid memory leaks
-// - Normalizes API responses more defensively
-// - Improves sorting and product lookup robustness (supports both `id` and `_id`)
-// - Uses toasts instead of alerts where possible and falls back to window.alert
-// - Adds small accessibility improvements for modals
-// - Keeps your original UI and logic structure intact but hardens edge cases
-
+// Admin dashboard with robust toasts that ALWAYS show a top-center banner
 export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [users, setUsers] = useState([]);
@@ -51,28 +44,30 @@ export default function AdminDashboard() {
   const mountedRef = useRef(true);
   const { toast } = useToast();
 
-  // In-app notification banner (fallback when toast isn't showing)
-  const [banner, setBanner] = useState(null); // { message, variant }
-  const bannerTimerRef = useRef(null);
+  // Notification banner state (top-center)
+  const [banner, setBanner] = useState(null); // { title, description, variant }
+  const bannerTimeoutRef = useRef(null);
 
-  const notify = (message, variant = "info", ms = 4000) => {
-    // Clear existing timer
-    if (bannerTimerRef.current) {
-      clearTimeout(bannerTimerRef.current);
-      bannerTimerRef.current = null;
+  // Helpful notify helper that shows a top-center banner and clears it after a timeout
+  const notify = useCallback((opts = {}) => {
+    const { title = "", description = "", variant = "default", duration = 4000 } = opts;
+    // clear previous timeout
+    if (bannerTimeoutRef.current) {
+      clearTimeout(bannerTimeoutRef.current);
+      bannerTimeoutRef.current = null;
     }
-    setBanner({ message, variant });
-    bannerTimerRef.current = setTimeout(() => {
+    setBanner({ title, description, variant });
+    bannerTimeoutRef.current = setTimeout(() => {
       setBanner(null);
-      bannerTimerRef.current = null;
-    }, ms);
-  };
+      bannerTimeoutRef.current = null;
+    }, duration);
+  }, []);
 
   useEffect(() => {
     return () => {
-      if (bannerTimerRef.current) {
-        clearTimeout(bannerTimerRef.current);
-        bannerTimerRef.current = null;
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+        bannerTimeoutRef.current = null;
       }
     };
   }, []);
@@ -100,12 +95,10 @@ export default function AdminDashboard() {
   }, []);
 
   // Object URL management to avoid leaking blob URLs created by URL.createObjectURL
-  // We keep a map(File -> objectUrl) in a ref so we can revoke when the file is removed or component unmounts
   const objectUrlMapRef = useRef(new WeakMap());
 
   useEffect(() => {
     return () => {
-      // revoke all created urls on unmount
       try {
         const wm = objectUrlMapRef.current;
         if (wm && typeof wm.forEach === "function") {
@@ -132,11 +125,9 @@ export default function AdminDashboard() {
     }
   };
 
-  // Robust image URL resolver: accepts many shapes and falls back to placeholder
+  // Robust image URL resolver
   const getImageUrl = (img) => {
     if (!img) return "/placeholder.png";
-
-    // File/Blob preview
     try {
       if (typeof File !== "undefined" && img instanceof File) {
         const u = createObjectUrlForFile(img);
@@ -146,24 +137,18 @@ export default function AdminDashboard() {
         const u = createObjectUrlForFile(img);
         return u || "/placeholder.png";
       }
-    } catch (e) {
-      // ignore
-    }
+    } catch (e) { /* ignore */ }
 
-    // String values
     if (typeof img === "string") {
       const s = img.trim();
       if (!s) return "/placeholder.png";
-
       if (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("//")) return s;
       if (s.startsWith("/")) return `${API_BASE}${s}`;
       if (/^uploads[\\/]/i.test(s)) return `${API_BASE}/${s.replace(/^\/+/, "")}`;
       if (!s.includes("://")) return `${API_BASE}/${s.replace(/^\/+/, "")}`;
-
       return s;
     }
 
-    // Object shapes: try common fields
     if (typeof img === "object") {
       const tryStr = (v) => (typeof v === "string" && v.trim() ? getImageUrl(v.trim()) : null);
       const candidates = [
@@ -187,7 +172,7 @@ export default function AdminDashboard() {
     return "/placeholder.png";
   };
 
-  // Build a map of products by id for fast lookup (supports both _id and id)
+  // Build a map of products by id for fast lookup
   const productsById = useMemo(() => {
     const map = new Map();
     if (Array.isArray(products)) {
@@ -203,11 +188,9 @@ export default function AdminDashboard() {
   // Normalizes "it.product" entry to a product object when possible
   const resolveProduct = (raw) => {
     if (!raw) return null;
-
     if (typeof raw === "string" || typeof raw === "number") {
       return productsById.get(String(raw)) || { _id: String(raw) };
     }
-
     if (typeof raw === "object") {
       const id = raw._id ?? raw.id;
       if (id) {
@@ -216,7 +199,6 @@ export default function AdminDashboard() {
       }
       return raw;
     }
-
     return null;
   };
 
@@ -237,48 +219,39 @@ export default function AdminDashboard() {
   const unwrapResource = (res) => {
     const d = res?.data ?? res;
     if (!d) return null;
-    // if server returns { data: { ... } }
     if (d && typeof d === 'object' && Object.keys(d).length > 0 && (d._id || d.id || d.name)) return d;
-    // try res.data.data
     if (d.data && typeof d.data === 'object') return d.data;
     return d;
   };
 
-  // Robust showToast helper that tries multiple call shapes and falls back to alert
-  const showToast = (opts = {}) => {
+  // Robust showToast helper that tries multiple call shapes AND ensures top-center banner
+  const showToast = useCallback((opts = {}) => {
     const { title = "", description = "", variant = "default", duration } = opts;
 
-    // If `toast` is a function (common with shadcn/ui), call with an object
+    // Try built-in toast if available
     if (typeof toast === "function") {
       try {
         toast({ title, description, variant, duration });
-        return;
       } catch (e) {
         try {
-          // alternative call signature
+          // alternative signature
           toast(title, { description, variant, duration });
-          return;
         } catch (e2) {
-          console.debug("toast call attempts failed", e, e2);
+          // ignore — we'll show the banner below
+          console.debug("toast provider calls failed", e, e2);
         }
       }
-    }
-
-    // If toast is an object with show (some libs use this)
-    if (toast && typeof toast.show === "function") {
+    } else if (toast && typeof toast.show === "function") {
       try {
         toast.show({ title, description, variant, duration });
-        return;
       } catch (e) {
         console.debug("toast.show failed", e);
       }
     }
 
-    // Final fallback to alert
-    if (title) {
-      window.alert(title + (description ? `\n\n${description}` : ""));
-    }
-  };
+    // Always show banner at top center as reliable fallback/guarantee
+    notify({ title, description, variant, duration: duration ?? 4000 });
+  }, [toast, notify]);
 
   // Fetch admin data (initial)
   useEffect(() => {
@@ -295,12 +268,11 @@ export default function AdminDashboard() {
       const config = { headers: { Authorization: `Bearer ${token}` } };
 
       try {
-        // NOTE: fetch messages from /contact (admin-protected)
         const [usersRes, ordersRes, messagesRes, loginsRes, productsRes, analyticsRes] =
           await Promise.all([
             API.get("/admin/users", config),
             API.get("/admin/orders", config),
-            API.get("/contact", config), // <--- fetch messages here
+            API.get("/contact", config),
             API.get("/admin/logins", config),
             API.get("/admin/products", config),
             API.get("/admin/analytics", config),
@@ -335,17 +307,15 @@ export default function AdminDashboard() {
     };
   }, []);
 
-  // ---------- Polling: auto-refresh messages count ----------
+  // Polling: auto-refresh messages count
   useEffect(() => {
     let isMounted = true;
     const token = localStorage.getItem("token");
-    if (!token) return; // don't start polling without auth
-
+    if (!token) return;
     const config = { headers: { Authorization: `Bearer ${token}` } };
 
     const poll = async () => {
       try {
-        // poll the same endpoint used by backend for admin messages
         const res = await API.get("/contact", config);
         const m = unwrapArray(res);
         if (!isMounted) return;
@@ -354,8 +324,7 @@ export default function AdminDashboard() {
           const newLen = Array.isArray(m) ? m.length : 0;
           if (newLen !== prevLen) {
             if (newLen > prevLen) {
-              showToast({ title: "New message received", description: `${newLen - prevLen} new message(s)` });
-              notify(`${newLen - prevLen} new message(s)`, "info");
+              showToast({ title: "New message received", description: `${newLen - prevLen} new message(s)`, variant: "info" });
             }
             return m;
           }
@@ -373,9 +342,9 @@ export default function AdminDashboard() {
       isMounted = false;
       clearInterval(id);
     };
-  }, [POLL_INTERVAL]);
+  }, [POLL_INTERVAL, showToast]);
 
-  // --- Admin actions ---------------------------------------------------------
+  // Admin actions (delete, add, update, etc.)
   const handleDeleteMessage = async (id) => {
     if (!id) return;
     if (!window.confirm("Delete this message? This action is irreversible.")) return;
@@ -383,12 +352,10 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/contact/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setMessages((prev) => (Array.isArray(prev) ? prev.filter((m) => String(m._id || m.id) !== String(id)) : prev));
-      showToast({ title: "Message deleted" });
-      notify("Message deleted", "info");
+      showToast({ title: "Message deleted", variant: "success" });
     } catch (err) {
       console.error("Delete message error:", err);
-      showToast({ title: "Failed to delete message", variant: "destructive" });
-      notify("Failed to delete message", "destructive");
+      showToast({ title: "Failed to delete message", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
@@ -399,16 +366,13 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/admin/users/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setUsers((prev) => (Array.isArray(prev) ? prev.filter((u) => String(u._id || u.id) !== String(id)) : prev));
-      showToast({ title: "User deleted" });
-      notify("User deleted", "info");
+      showToast({ title: "User deleted", variant: "success" });
     } catch (err) {
       console.error("Delete user error:", err);
-      showToast({ title: "Failed to delete user", variant: "destructive" });
-      notify("Failed to delete user", "destructive");
+      showToast({ title: "Failed to delete user", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
-  // IMPORTANT: use admin endpoints (/admin/orders/...) — server registers these under /api/admin
   const handleDeleteOrder = async (id) => {
     if (!id) return;
     if (!window.confirm("Delete this order? This cannot be undone.")) return;
@@ -416,22 +380,18 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/admin/orders/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setOrders((prev) => (Array.isArray(prev) ? prev.filter((o) => String(o._id || o.id) !== String(id)) : prev));
-      showToast({ title: "Order deleted" });
-      notify("Order deleted", "info");
+      showToast({ title: "Order deleted", variant: "success" });
     } catch (err) {
       console.error("Delete order error:", err);
-      const msg = err?.response?.data?.message || err?.message || "Failed to delete order";
-      showToast({ title: "Failed to delete order", description: msg, variant: "destructive" });
-      notify("Failed to delete order", "destructive");
+      showToast({ title: "Failed to delete order", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
-  // --- Product handlers ---
+  // Add product
   const handleAddProduct = async () => {
     const imagesCount = images?.length ?? 0;
     if (!name || !price || !category || !stock || imagesCount === 0) {
-      showToast({ title: "Validation", description: "All fields and at least one image are required." });
-      notify("All fields and at least one image are required.", "destructive");
+      showToast({ title: "Validation", description: "All fields and at least one image are required.", variant: "destructive" });
       return;
     }
 
@@ -446,14 +406,11 @@ export default function AdminDashboard() {
     try {
       const token = localStorage.getItem("token");
       const res = await API.post("/admin/products", formData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          // do NOT set Content-Type here — let the browser/axios set the multipart boundary
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       const newProduct = unwrapResource(res) || res.data || res;
-      const productName = name || (newProduct && (newProduct.name || newProduct.title)) || "Product";
+      const productName = (newProduct && (newProduct.name || newProduct.title)) || name || "Product";
       if (newProduct) setProducts((prev) => [...prev, newProduct]);
 
       setName("");
@@ -465,12 +422,9 @@ export default function AdminDashboard() {
       if (addFileInputRef.current) addFileInputRef.current.value = "";
 
       showToast({ title: "Product added", description: `${productName} added successfully.`, variant: "success" });
-      notify(`${productName} added successfully.`, "success");
     } catch (err) {
       console.error("Add product error", err);
-      const msg = err?.response?.data?.message || "Failed to add product";
-      showToast({ title: msg, variant: "destructive" });
-      notify(msg, "destructive");
+      showToast({ title: "Failed to add product", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
@@ -481,13 +435,10 @@ export default function AdminDashboard() {
       const token = localStorage.getItem("token");
       await API.delete(`/admin/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setProducts((prev) => prev.filter((p) => String(p._id || p.id) !== String(id)));
-      showToast({ title: "Product deleted." });
-      notify("Product deleted", "info");
+      showToast({ title: "Product deleted", variant: "success" });
     } catch (err) {
       console.error("Delete product error", err);
-      const msg = err?.response?.data?.message || "Failed to delete product";
-      showToast({ title: msg, variant: "destructive" });
-      notify(msg, "destructive");
+      showToast({ title: "Failed to delete product", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
@@ -519,8 +470,7 @@ export default function AdminDashboard() {
 
   const handleUpdateProduct = async (id) => {
     if (!editName || !editPrice || !editCategory || !editStock) {
-      showToast({ title: "Validation", description: "Name, price, category and stock are required." });
-      notify("Name, price, category and stock are required.", "destructive");
+      showToast({ title: "Validation", description: "Name, price, category and stock are required.", variant: "destructive" });
       return;
     }
 
@@ -537,9 +487,7 @@ export default function AdminDashboard() {
     try {
       const token = localStorage.getItem("token");
       const res = await API.put(`/admin/products/${id}`, formData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        headers: { Authorization: `Bearer ${token}` },
       });
 
       const updated = unwrapResource(res) || res.data || res;
@@ -547,14 +495,11 @@ export default function AdminDashboard() {
 
       const updatedName = (updated && (updated.name || updated.title)) || editName || "Product";
       showToast({ title: "Product updated", description: `${updatedName} updated successfully.`, variant: "success" });
-      notify(`${updatedName} updated successfully.`, "success");
 
       handleCancelEdit();
     } catch (err) {
       console.error("Update product error", err);
-      const msg = err?.response?.data?.message || "Failed to update product";
-      showToast({ title: msg, variant: "destructive" });
-      notify(msg, "destructive");
+      showToast({ title: "Failed to update product", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
@@ -562,20 +507,13 @@ export default function AdminDashboard() {
     if (!window.confirm("Mark this order as paid?")) return;
     try {
       const token = localStorage.getItem("token");
-      const res = await API.put(
-        `/admin/orders/${orderId}`,
-        { isPaid: true, paidAt: new Date().toISOString() },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await API.put(`/admin/orders/${orderId}`, { isPaid: true, paidAt: new Date().toISOString() }, { headers: { Authorization: `Bearer ${token}` } });
       const updated = unwrapResource(res) || res.data || res;
       setOrders((prev) => prev.map(o => (String(o._id || o.id) === String(orderId) ? updated : o)));
-      showToast({ title: "Order marked as paid" });
-      notify("Order marked as paid", "info");
+      showToast({ title: "Order marked as paid", variant: "success" });
     } catch (err) {
       console.error("Mark paid error:", err);
-      const msg = err?.response?.data?.message || err?.message || "Failed to mark as paid";
-      showToast({ title: "Failed to mark as paid", description: msg, variant: "destructive" });
-      notify(msg, "destructive");
+      showToast({ title: "Failed to mark as paid", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
@@ -583,20 +521,13 @@ export default function AdminDashboard() {
     if (!window.confirm("Mark this order as delivered?")) return;
     try {
       const token = localStorage.getItem("token");
-      const res = await API.put(
-        `/admin/orders/${orderId}`,
-        { isDelivered: true, deliveredAt: new Date().toISOString() },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      const res = await API.put(`/admin/orders/${orderId}`, { isDelivered: true, deliveredAt: new Date().toISOString() }, { headers: { Authorization: `Bearer ${token}` } });
       const updated = unwrapResource(res) || res.data || res;
       setOrders((prev) => prev.map(o => (String(o._id || o.id) === String(orderId) ? updated : o)));
-      showToast({ title: "Order marked as delivered" });
-      notify("Order marked as delivered", "info");
+      showToast({ title: "Order marked as delivered", variant: "success" });
     } catch (err) {
       console.error("Mark delivered error:", err);
-      const msg = err?.response?.data?.message || err?.message || "Failed to mark as delivered";
-      showToast({ title: "Failed to mark as delivered", description: msg, variant: "destructive" });
-      notify(msg, "destructive");
+      showToast({ title: "Failed to mark as delivered", description: err?.response?.data?.message || err?.message, variant: "destructive" });
     }
   };
 
@@ -635,7 +566,6 @@ export default function AdminDashboard() {
   const renderTabContent = () => {
     switch (activeTab) {
       case "overview": {
-        // compute total revenue using stable keys (total || totalPrice || derived)
         const revenueSum = orders.reduce((sum, o) => {
           const t = Number(o.total ?? o.totalPrice ?? 0);
           return sum + (Number.isFinite(t) ? t : 0);
@@ -740,7 +670,6 @@ export default function AdminDashboard() {
         return (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {orders.map((order) => {
-              // compute total robustly
               const total = Number(order.total ?? order.totalPrice ?? 0) || (Array.isArray(order.products) ? order.products.reduce((s, it) => {
                 const p = resolveProduct(it.product) || {};
                 const unit = Number(p.price ?? p?.unitPrice ?? 0) || 0;
@@ -1039,20 +968,30 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
-      {/* Notification banner (top-right) */}
+      {/* TOP-CENTER BANNER */}
       {banner && (
-        <div className="fixed top-6 right-6 z-60">
+        <div className="fixed inset-x-0 top-6 z-60 flex justify-center pointer-events-none">
           <div
             role="status"
             aria-live="polite"
-            className={`max-w-md px-4 py-2 rounded-lg shadow-lg text-sm font-medium border ${
-              banner.variant === "success" ? "bg-green-50 text-green-800 border-green-200" :
-              banner.variant === "destructive" ? "bg-red-50 text-red-800 border-red-200" :
-              banner.variant === "info" ? "bg-sky-50 text-sky-800 border-sky-200" :
-              "bg-gray-50 text-gray-800 border-gray-200"
-            }`}
+            className={`pointer-events-auto px-4 py-2 rounded-md shadow-lg max-w-lg w-full mx-4 transform transition-all duration-300
+              ${banner.variant === "success" ? "bg-green-600 text-white" : banner.variant === "destructive" ? "bg-red-600 text-white" : "bg-slate-800 text-white"}`}
           >
-            {banner.message}
+            <div className="flex items-start gap-3">
+              <div className="flex-1">
+                <div className="font-semibold leading-tight">{banner.title}</div>
+                {banner.description && <div className="text-sm opacity-90 mt-1">{banner.description}</div>}
+              </div>
+              <div className="ml-3 shrink-0">
+                <button
+                  onClick={() => setBanner(null)}
+                  className="text-white/90 hover:text-white text-sm px-2 py-1 rounded"
+                  aria-label="Dismiss notification"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
