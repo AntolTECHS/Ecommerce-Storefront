@@ -19,10 +19,28 @@ export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
+  // CATEGORY LIST (dropdown suggestions)
+  const CATEGORY_LIST = useMemo(
+    () => [
+      "Computers & Laptops",
+      "Mobile & Wearables",
+      "Audio & Entertainment",
+      "Gaming",
+      "Computer Accessories & Peripherals",
+      "Smart Home & IoT",
+      "Power & Charging",
+      "Cameras & Imaging",
+      "Office & Productivity",
+      "Software & Services",
+    ],
+    []
+  );
+
   // Add product form state
   const [name, setName] = useState("");
   const [price, setPrice] = useState("");
   const [category, setCategory] = useState("");
+  const [customCategory, setCustomCategory] = useState("");
   const [stock, setStock] = useState("");
   const [description, setDescription] = useState("");
   const [images, setImages] = useState([]); // Array<File>
@@ -34,6 +52,7 @@ export default function AdminDashboard() {
   const [editName, setEditName] = useState("");
   const [editPrice, setEditPrice] = useState("");
   const [editCategory, setEditCategory] = useState("");
+  const [editCustomCategory, setEditCustomCategory] = useState("");
   const [editStock, setEditStock] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editExistingImages, setEditExistingImages] = useState([]);
@@ -390,15 +409,17 @@ export default function AdminDashboard() {
   // Add product
   const handleAddProduct = async () => {
     const imagesCount = images?.length ?? 0;
-    if (!name || !price || !category || !stock || imagesCount === 0) {
-      showToast({ title: "Validation", description: "All fields and at least one image are required.", variant: "destructive" });
+    const finalCategory = category === "OTHER" ? (customCategory || "") : category;
+
+    if (!name || !price || !finalCategory || !stock || imagesCount === 0) {
+      showToast({ title: "Validation", description: "All fields and at least one image are required. Please select or type a category.", variant: "destructive" });
       return;
     }
 
     const formData = new FormData();
     formData.append("name", name);
     formData.append("price", String(price));
-    formData.append("category", category);
+    formData.append("category", finalCategory);
     formData.append("stock", String(stock));
     formData.append("description", description || "");
     images.forEach((file) => formData.append("images", file));
@@ -416,6 +437,7 @@ export default function AdminDashboard() {
       setName("");
       setPrice("");
       setCategory("");
+      setCustomCategory("");
       setStock("");
       setDescription("");
       setImages([]);
@@ -446,7 +468,20 @@ export default function AdminDashboard() {
     setEditingProduct(product);
     setEditName(product.name || "");
     setEditPrice(product.price || "");
-    setEditCategory(product.category || "");
+
+    // If product.category exists and is in our list, preselect it. Otherwise set to OTHER and populate editCustomCategory.
+    const prodCat = product.category || "";
+    if (prodCat && CATEGORY_LIST.includes(prodCat)) {
+      setEditCategory(prodCat);
+      setEditCustomCategory("");
+    } else if (prodCat) {
+      setEditCategory("OTHER");
+      setEditCustomCategory(prodCat);
+    } else {
+      setEditCategory("");
+      setEditCustomCategory("");
+    }
+
     setEditStock(product.stock || "");
     setEditDescription(product.description || "");
     setEditExistingImages(Array.isArray(product.images) ? product.images : (product.images ? [product.images] : []));
@@ -463,13 +498,16 @@ export default function AdminDashboard() {
     setEditName("");
     setEditPrice("");
     setEditCategory("");
+    setEditCustomCategory("");
     setEditStock("");
     setEditDescription("");
     if (editFileInputRef.current) editFileInputRef.current.value = "";
   };
 
   const handleUpdateProduct = async (id) => {
-    if (!editName || !editPrice || !editCategory || !editStock) {
+    const finalCategory = editCategory === "OTHER" ? (editCustomCategory || "") : editCategory;
+
+    if (!editName || !editPrice || !finalCategory || !editStock) {
       showToast({ title: "Validation", description: "Name, price, category and stock are required.", variant: "destructive" });
       return;
     }
@@ -477,7 +515,7 @@ export default function AdminDashboard() {
     const formData = new FormData();
     formData.append("name", editName);
     formData.append("price", String(editPrice));
-    formData.append("category", editCategory);
+    formData.append("category", finalCategory);
     formData.append("stock", String(editStock));
     formData.append("description", editDescription || "");
     if (editNewImages && editNewImages.length > 0) {
@@ -862,7 +900,30 @@ export default function AdminDashboard() {
               <CardContent className="space-y-3">
                 <input className="w-full p-2 border rounded-lg" placeholder="Name" value={name} onChange={e => setName(e.target.value)} />
                 <input className="w-full p-2 border rounded-lg" placeholder="Price (amount only, stored as number)" type="number" value={price} onChange={e => setPrice(e.target.value)} />
-                <input className="w-full p-2 border rounded-lg" placeholder="Category" value={category} onChange={e => setCategory(e.target.value)} />
+
+                {/* Category dropdown + optional custom input */}
+                <div>
+                  <label className="sr-only">Category</label>
+                  <select
+                    className="w-full p-2 border rounded-lg"
+                    value={category}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setCategory(v);
+                      if (v !== "OTHER") setCustomCategory("");
+                    }}
+                  >
+                    <option value="" disabled>
+                      Select category
+                    </option>
+                    {CATEGORY_LIST.map((c) => <option key={c} value={c}>{c}</option>)}
+                    <option value="OTHER">Other (type your own)</option>
+                  </select>
+                  {category === "OTHER" && (
+                    <input className="w-full mt-2 p-2 border rounded-lg" placeholder="Type custom category" value={customCategory} onChange={(e) => { setCustomCategory(e.target.value); }} />
+                  )}
+                </div>
+
                 <input className="w-full p-2 border rounded-lg" placeholder="Stock" type="number" value={stock} onChange={e => setStock(e.target.value)} />
                 <textarea className="w-full p-2 border rounded-lg" placeholder="Description" value={description} onChange={e => setDescription(e.target.value)} />
                 <input
@@ -1035,7 +1096,22 @@ export default function AdminDashboard() {
 
               <div>
                 <label className="block text-sm font-medium text-gray-700">Category</label>
-                <input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} className="mt-1 w-full p-2 border rounded" />
+                <select
+                  value={editCategory}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setEditCategory(v);
+                    if (v !== "OTHER") setEditCustomCategory("");
+                  }}
+                  className="mt-1 w-full p-2 border rounded"
+                >
+                  <option value="" disabled>Select category</option>
+                  {CATEGORY_LIST.map((c) => <option key={c} value={c}>{c}</option>)}
+                  <option value="OTHER">Other (type your own)</option>
+                </select>
+                {editCategory === "OTHER" && (
+                  <input className="w-full mt-2 p-2 border rounded-lg" placeholder="Type custom category" value={editCustomCategory} onChange={(e) => { setEditCustomCategory(e.target.value); }} />
+                )}
               </div>
 
               <div>
