@@ -136,10 +136,16 @@ const Index = () => {
     "http://localhost:5000";
   const API_BASE = String(rawApiBase).replace(/^http:\/\//, "https://").replace(/\/$/, "");
 
-  // Currency formatter for Kenyan shillings
-  const formatKES = (value) => {
+  // Currency formatter for Kenyan shillings — display using "KSH"
+  const formatKSH = (value) => {
     const amount = Number(value) || 0;
-    return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+    try {
+      // Format using Intl and replace the currency code KES with KSH for display
+      const formatted = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+      return formatted.replace(/KES/g, "KSH");
+    } catch (e) {
+      return `KSH ${amount.toFixed(2)}`;
+    }
   };
 
   // helper to produce a usable image src from many backend shapes
@@ -494,7 +500,7 @@ const Index = () => {
                         </div>
 
                         {/* Make product price smaller and less bold */}
-                        <div className="text-lg font-medium text-gray-900">{formatKES(product.price)}</div>
+                        <div className="text-sm font-medium text-gray-900">{formatKSH(product.price)}</div>
                       </div>
 
                       {/* Right: actions for large screens */}
