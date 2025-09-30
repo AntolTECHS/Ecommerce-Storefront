@@ -461,8 +461,9 @@ const Index = () => {
                       </div>
                     )}
 
+                    {/* Make category text smaller */}
                     <div className="absolute top-3 left-3">
-                      <Badge className="uppercase text-xs px-2 py-1">{product.category || "Uncategorized"}</Badge>
+                      <Badge className="uppercase text-[10px] px-2 py-0.5">{product.category || "Uncategorized"}</Badge>
                     </div>
                     {product.stock <= 0 && (
                       <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-semibold px-2 py-1 rounded">Out of stock</div>
@@ -487,11 +488,13 @@ const Index = () => {
                           {product.description || "No description provided."}
                         </p>
 
-                        <div className="text-sm text-gray-500 mb-2">
-                          Stock: <span className="font-medium">{product.stock ?? 0}</span>
+                        {/* Make stock text smaller */}
+                        <div className="text-xs text-gray-500 mb-2">
+                          Stock: <span className="font-normal text-xs">{product.stock ?? 0}</span>
                         </div>
 
-                        <div className="text-xl font-bold text-gray-900">{formatKES(product.price)}</div>
+                        {/* Make product price smaller and less bold */}
+                        <div className="text-lg font-medium text-gray-900">{formatKES(product.price)}</div>
                       </div>
 
                       {/* Right: actions for large screens */}
