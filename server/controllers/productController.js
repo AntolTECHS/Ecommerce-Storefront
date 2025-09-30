@@ -2,23 +2,32 @@
 'use strict';
 
 const Product = require('../models/Product');
+const { cloudinary } = require('../config/cloudinary'); // ensure this exports cloudinary
+const url = require('url');
 
 /**
- * Helper: normalize image paths to full URLs
- * - Accepts absolute URLs (http/https), protocol-relative (//host/path) and relative paths.
- * - Ensures returned values are absolute URLs when possible.
+ * Helper: normalize image entries (string or object) to absolute URLs
+ * Accepts:
+ *  - image strings (absolute or relative)
+ *  - image objects { url, public_id }
  */
 const buildImageUrls = (req, images) => {
   if (!images || !Array.isArray(images) || images.length === 0) return [];
   return images
     .map((img) => {
       if (!img) return null;
-      const s = String(img).trim();
+
+      // if object, prefer its url prop
+      const raw = typeof img === 'object' ? (img.url || '') : String(img);
+      const s = String(raw).trim();
       if (!s) return null;
+
       // already absolute
       if (/^https?:\/\//i.test(s)) return s;
+
       // protocol-relative (//cdn.example.com/...)
       if (s.startsWith('//')) return `${req.protocol}:${s}`;
+
       // otherwise ensure leading slash and prefix host
       const path = s.startsWith('/') ? s : `/${s}`;
       return `${req.protocol}://${req.get('host')}${path}`;
@@ -28,6 +37,7 @@ const buildImageUrls = (req, images) => {
 
 /**
  * Helper: pick primary image (first in images array) or fallback to `product.image` if present.
+ * Accepts images as array of strings or objects.
  */
 const pickPrimaryImage = (req, images, fallback) => {
   const imgs = buildImageUrls(req, images);
@@ -44,7 +54,8 @@ const pickPrimaryImage = (req, images, fallback) => {
 };
 
 /**
- * Utility: parse `images` value that might be an array, JSON string, or CSV string.
+ * parseImagesField: accept array | JSON string | CSV string and normalize to array
+ * Returns undefined if field not provided.
  */
 const parseImagesField = (imagesField) => {
   if (typeof imagesField === 'undefined' || imagesField === null) return undefined;
@@ -52,18 +63,30 @@ const parseImagesField = (imagesField) => {
   if (typeof imagesField === 'string') {
     const trimmed = imagesField.trim();
     if (!trimmed) return [];
-    // try JSON.parse
     try {
       const parsed = JSON.parse(trimmed);
       if (Array.isArray(parsed)) return parsed;
     } catch (e) {
-      // ignore JSON parse error
+      // not JSON
     }
-    // treat as CSV
     return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
   }
   return undefined;
 };
+
+/**
+ * Convert uploaded file (multer/cloudinary) into { url, public_id } object
+ * Handles common fields set by multer-storage-cloudinary: path, secure_url, url, location, filename, public_id
+ */
+const fileToImageObject = (file) => {
+  if (!file) return null;
+  const imgUrl = file.path || file.secure_url || file.url || file.location || null;
+  const public_id = file.filename || file.public_id || null;
+  if (!imgUrl) return null;
+  return { url: imgUrl, public_id };
+};
+
+/* ================== CONTROLLERS ================== */
 
 // @desc Get all products
 // @route GET /api/products
@@ -75,6 +98,7 @@ const getProducts = async (req, res) => {
       const imgs = buildImageUrls(req, p.images);
       return {
         ...p._doc,
+        // Keep stored structure (objects) but return URL strings for convenience in `images` field
         images: imgs,
         image: imgs.length ? imgs[0] : (p.image ? pickPrimaryImage(req, [], p.image) : null),
       };
@@ -113,19 +137,33 @@ const getProductById = async (req, res) => {
 // @access Admin
 const createProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock } = req.body;
-
-    // Build image paths:
-    // - prefer uploaded files (Cloudinary via multer-storage-cloudinary), extracting the URL
-    // - otherwise allow `images` from body (array, JSON string, CSV)
-    let imagesFromFiles = [];
-    if (req.files && Array.isArray(req.files) && req.files.length) {
-      imagesFromFiles = req.files
-        .map((file) => file.path || file.url || file.secure_url || file.location) // handle common field names
-        .filter(Boolean);
+    // optional debug logging (remove or reduce in production)
+    console.log('createProduct req.body keys:', Object.keys(req.body || {}));
+    if (req.files) {
+      console.log('createProduct req.files count:', Array.isArray(req.files) ? req.files.length : 'not-array');
     }
 
-    const bodyImages = parseImagesField(req.body.images);
+    const { name, description, price, category, stock } = req.body;
+
+    // images from uploaded files (Cloudinary)
+    let imagesFromFiles = [];
+    if (Array.isArray(req.files) && req.files.length) {
+      imagesFromFiles = req.files.map(fileToImageObject).filter(Boolean);
+    }
+
+    // images from body (strings or objects)
+    const bodyImagesRaw = parseImagesField(req.body.images);
+    let bodyImages = undefined;
+    if (typeof bodyImagesRaw !== 'undefined') {
+      bodyImages = bodyImagesRaw.map((i) => {
+        if (!i) return null;
+        if (typeof i === 'string') return { url: i, public_id: null };
+        if (typeof i === 'object' && i.url) return { url: i.url, public_id: i.public_id || null };
+        return null;
+      }).filter(Boolean);
+    }
+
+    // Prefer uploaded files (if any), otherwise body images
     const images = imagesFromFiles.length ? imagesFromFiles : (Array.isArray(bodyImages) ? bodyImages : []);
 
     const product = new Product({
@@ -146,8 +184,10 @@ const createProduct = async (req, res) => {
       image: imgs.length ? imgs[0] : null,
     });
   } catch (error) {
-    console.error('❌ Error in createProduct:', error && error.message);
-    res.status(500).json({ message: error.message });
+    console.error('❌ createProduct error:', error && error.stack ? error.stack : error);
+    const payload = { message: error.message };
+    if (process.env.NODE_ENV === 'development') payload.stack = error.stack;
+    res.status(500).json(payload);
   }
 };
 
@@ -156,48 +196,52 @@ const createProduct = async (req, res) => {
 // @access Admin
 const updateProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock } = req.body;
+    console.log('updateProduct id:', req.params.id);
+    console.log('updateProduct body keys:', Object.keys(req.body || {}));
+    if (req.files) console.log('updateProduct files:', Array.isArray(req.files) ? req.files.length : 'not-array');
 
+    const { name, description, price, category, stock } = req.body;
     const product = await Product.findById(req.params.id);
 
-    if (product) {
-      product.name = name ?? product.name;
-      product.description = description ?? product.description;
-      product.price = price ?? product.price;
-      product.category = category ?? product.category;
-      product.stock = stock ?? product.stock;
+    if (!product) return res.status(404).json({ message: 'Product not found' });
 
-      // If client sends an `images` field explicitly, treat it as authoritative:
-      // - if provided it will replace the product.images (even an empty array to clear)
-      const bodyImages = parseImagesField(req.body.images);
-      if (typeof bodyImages !== 'undefined') {
-        product.images = bodyImages;
-      }
+    product.name = name ?? product.name;
+    product.description = description ?? product.description;
+    product.price = price ?? product.price;
+    product.category = category ?? product.category;
+    product.stock = stock ?? product.stock;
 
-      // If files were uploaded (Cloudinary), append their URLs to product.images
-      if (req.files && Array.isArray(req.files) && req.files.length) {
-        const newFromFiles = req.files
-          .map((file) => file.path || file.url || file.secure_url || file.location)
-          .filter(Boolean);
-
-        // append to existing images array (prevents accidental overwrite)
-        product.images = Array.isArray(product.images) ? product.images.concat(newFromFiles) : newFromFiles;
-      }
-
-      const updatedProduct = await product.save();
-      const imgs = buildImageUrls(req, updatedProduct.images);
-
-      res.json({
-        ...updatedProduct._doc,
-        images: imgs,
-        image: imgs.length ? imgs[0] : (updatedProduct.image ? pickPrimaryImage(req, [], updatedProduct.image) : null),
-      });
-    } else {
-      res.status(404).json({ message: 'Product not found' });
+    // If `images` provided explicitly in body -> authoritative replacement
+    const bodyImagesRaw = parseImagesField(req.body.images);
+    if (typeof bodyImagesRaw !== 'undefined') {
+      const normalizedBodyImages = bodyImagesRaw.map((i) => {
+        if (!i) return null;
+        if (typeof i === 'string') return { url: i, public_id: null };
+        if (typeof i === 'object' && i.url) return { url: i.url, public_id: i.public_id || null };
+        return null;
+      }).filter(Boolean);
+      product.images = normalizedBodyImages;
     }
+
+    // Append newly uploaded files (if any)
+    if (Array.isArray(req.files) && req.files.length) {
+      const newFromFiles = req.files.map(fileToImageObject).filter(Boolean);
+      product.images = Array.isArray(product.images) ? product.images.concat(newFromFiles) : newFromFiles;
+    }
+
+    const updatedProduct = await product.save();
+    const imgs = buildImageUrls(req, updatedProduct.images);
+
+    res.json({
+      ...updatedProduct._doc,
+      images: imgs,
+      image: imgs.length ? imgs[0] : (updatedProduct.image ? pickPrimaryImage(req, [], updatedProduct.image) : null),
+    });
   } catch (error) {
-    console.error('updateProduct error:', error);
-    res.status(500).json({ message: error.message });
+    console.error('updateProduct error:', error && error.stack ? error.stack : error);
+    const payload = { message: error.message };
+    if (process.env.NODE_ENV === 'development') payload.stack = error.stack;
+    res.status(500).json(payload);
   }
 };
 
@@ -208,17 +252,29 @@ const deleteProduct = async (req, res) => {
   try {
     const product = await Product.findById(req.params.id);
 
-    if (product) {
-      // OPTIONAL: if you stored Cloudinary public IDs, you could remove images from Cloudinary here.
-      // e.g. cloudinary.uploader.destroy(publicId)
-      // But since we store URLs, you'd need to store public IDs separately to delete.
-      await product.deleteOne();
-      res.json({ message: 'Product removed' });
-    } else {
-      res.status(404).json({ message: 'Product not found' });
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    // If product.images contain public_id values, try to remove them from Cloudinary
+    if (Array.isArray(product.images) && product.images.length) {
+      for (const img of product.images) {
+        try {
+          const publicId = (typeof img === 'object' ? img.public_id : null) || null;
+          if (publicId && cloudinary && typeof cloudinary.uploader.destroy === 'function') {
+            // destroy returns a promise
+            await cloudinary.uploader.destroy(publicId);
+            console.log('Cloudinary destroyed public_id:', publicId);
+          }
+        } catch (err) {
+          // log and continue; don't block delete if Cloudinary remove fails
+          console.warn('Cloudinary destroy failed for image:', img, err && err.message ? err.message : err);
+        }
+      }
     }
+
+    await product.deleteOne();
+    res.json({ message: 'Product removed' });
   } catch (error) {
-    console.error('deleteProduct error:', error);
+    console.error('deleteProduct error:', error && error.stack ? error.stack : error);
     res.status(500).json({ message: error.message });
   }
 };
