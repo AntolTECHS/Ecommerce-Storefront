@@ -43,6 +43,28 @@ const pickPrimaryImage = (req, images, fallback) => {
   return null;
 };
 
+/**
+ * Utility: parse `images` value that might be an array, JSON string, or CSV string.
+ */
+const parseImagesField = (imagesField) => {
+  if (typeof imagesField === 'undefined' || imagesField === null) return undefined;
+  if (Array.isArray(imagesField)) return imagesField;
+  if (typeof imagesField === 'string') {
+    const trimmed = imagesField.trim();
+    if (!trimmed) return [];
+    // try JSON.parse
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed;
+    } catch (e) {
+      // ignore JSON parse error
+    }
+    // treat as CSV
+    return trimmed.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return undefined;
+};
+
 // @desc Get all products
 // @route GET /api/products
 // @access Public
@@ -93,8 +115,18 @@ const createProduct = async (req, res) => {
   try {
     const { name, description, price, category, stock } = req.body;
 
-    // Build image paths if files uploaded
-    const images = req.files ? req.files.map((file) => `/uploads/${file.filename}`) : [];
+    // Build image paths:
+    // - prefer uploaded files (Cloudinary via multer-storage-cloudinary), extracting the URL
+    // - otherwise allow `images` from body (array, JSON string, CSV)
+    let imagesFromFiles = [];
+    if (req.files && Array.isArray(req.files) && req.files.length) {
+      imagesFromFiles = req.files
+        .map((file) => file.path || file.url || file.secure_url || file.location) // handle common field names
+        .filter(Boolean);
+    }
+
+    const bodyImages = parseImagesField(req.body.images);
+    const images = imagesFromFiles.length ? imagesFromFiles : (Array.isArray(bodyImages) ? bodyImages : []);
 
     const product = new Product({
       name,
@@ -124,7 +156,7 @@ const createProduct = async (req, res) => {
 // @access Admin
 const updateProduct = async (req, res) => {
   try {
-    const { name, description, price, category, stock, images } = req.body;
+    const { name, description, price, category, stock } = req.body;
 
     const product = await Product.findById(req.params.id);
 
@@ -135,21 +167,21 @@ const updateProduct = async (req, res) => {
       product.category = category ?? product.category;
       product.stock = stock ?? product.stock;
 
-      // prefer explicit images from body if provided (array of strings), else keep existing
-      if (typeof images !== 'undefined') {
-        // ensure images is an array; if it's a comma-separated string, split it
-        if (Array.isArray(images)) {
-          product.images = images;
-        } else if (typeof images === 'string') {
-          // try to parse JSON or CSV
-          try {
-            const maybe = JSON.parse(images);
-            if (Array.isArray(maybe)) product.images = maybe;
-            else product.images = images.split(',').map((s) => s.trim()).filter(Boolean);
-          } catch {
-            product.images = images.split(',').map((s) => s.trim()).filter(Boolean);
-          }
-        }
+      // If client sends an `images` field explicitly, treat it as authoritative:
+      // - if provided it will replace the product.images (even an empty array to clear)
+      const bodyImages = parseImagesField(req.body.images);
+      if (typeof bodyImages !== 'undefined') {
+        product.images = bodyImages;
+      }
+
+      // If files were uploaded (Cloudinary), append their URLs to product.images
+      if (req.files && Array.isArray(req.files) && req.files.length) {
+        const newFromFiles = req.files
+          .map((file) => file.path || file.url || file.secure_url || file.location)
+          .filter(Boolean);
+
+        // append to existing images array (prevents accidental overwrite)
+        product.images = Array.isArray(product.images) ? product.images.concat(newFromFiles) : newFromFiles;
       }
 
       const updatedProduct = await product.save();
@@ -177,6 +209,9 @@ const deleteProduct = async (req, res) => {
     const product = await Product.findById(req.params.id);
 
     if (product) {
+      // OPTIONAL: if you stored Cloudinary public IDs, you could remove images from Cloudinary here.
+      // e.g. cloudinary.uploader.destroy(publicId)
+      // But since we store URLs, you'd need to store public IDs separately to delete.
       await product.deleteOne();
       res.json({ message: 'Product removed' });
     } else {

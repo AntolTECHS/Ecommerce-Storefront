@@ -3,8 +3,6 @@ const express = require("express");
 const dotenv = require("dotenv");
 const morgan = require("morgan");
 const cors = require("cors");
-const path = require("path");
-const fs = require("fs");
 const http = require("http");
 const { Server } = require("socket.io");
 const connectDB = require("./config/db");
@@ -57,23 +55,6 @@ app.options(/^\/api\/.*$/, cors(corsOptions));
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
-
-/* ================== UPLOADS (static) ================== */
-const uploadsDir = path.join(__dirname, "uploads");
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const staticUploadsOptions = {
-  setHeaders: (res) => {
-    const frontend = "https://techstore-tau.vercel.app";
-    res.setHeader("Access-Control-Allow-Origin", frontend);
-    res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    res.setHeader("Access-Control-Allow-Credentials", "true");
-  },
-};
-
-app.use("/uploads", express.static(uploadsDir, staticUploadsOptions));
 
 /* ================== ROUTES ================== */
 const authRoutes = require("./routes/authRoutes");
