@@ -37,6 +37,9 @@ const Index = () => {
   const [isCartOpen, setIsCartOpen] = useState(false);
   // NOTE: selectedCategory uses normalized keys (lowercase). default is "all"
   const [selectedCategory, setSelectedCategory] = useState("all");
+  // showAllProducts controls whether to show only first 8 or all
+  const [showAllProducts, setShowAllProducts] = useState(false);
+
   // derive logged-in state from localStorage token so it reflects real auth state
   const [isLoggedIn, setIsLoggedIn] = useState(() => Boolean(localStorage.getItem("token")));
   const { toast } = useToast();
@@ -64,24 +67,24 @@ const Index = () => {
 
   // ---------------------------
   // Normalized categories (case-insensitive, deduplicated)
-  // returns array of { key, label } where key is lowercase trimmed category and label is a nice display name
+  // returns array of { key, label } where key is lowercase trimmed category and label is a lowercase display name
   // ---------------------------
   const categories = useMemo(() => {
     // gather raw categories preserving the order they appear in products
-    const rawCats = products.map((p) => p.category || "Uncategorized");
+    const rawCats = products.map((p) => p.category || "uncategorized");
 
     const normalizedMap = new Map();
     rawCats.forEach((cat) => {
       const key = (cat || "").toLowerCase().trim();
       if (!normalizedMap.has(key)) {
-        // create a display label by capitalizing words
-        const label = key.replace(/\b\w/g, (c) => c.toUpperCase());
+        // label is lowercase key (user requested lowercase)
+        const label = key;
         normalizedMap.set(key, label);
       }
     });
 
-    // include "All" at the front with key "all"
-    return [{ key: "all", label: "All" }, ...Array.from(normalizedMap.entries()).map(([key, label]) => ({ key, label }))];
+    // include "all" at the front with label "all" (lowercase)
+    return [{ key: "all", label: "all" }, ...Array.from(normalizedMap.entries()).map(([key, label]) => ({ key, label }))];
   }, [products]);
 
   // ---------- SEARCH ----------
@@ -116,6 +119,11 @@ const Index = () => {
       const cat = (p.category || "").toString().toLowerCase();
       return name.includes(q) || desc.includes(q) || cat.includes(q);
     });
+  }, [products, selectedCategory, searchQuery]);
+
+  // reset showAllProducts whenever the product set, selected category or search changes
+  useEffect(() => {
+    setShowAllProducts(false);
   }, [products, selectedCategory, searchQuery]);
 
   // Auto-save cart to localStorage whenever it changes
@@ -365,6 +373,10 @@ const Index = () => {
     );
   };
 
+  // Only show first 8 products when not expanded
+  const VISIBLE_LIMIT = 8;
+  const visibleProducts = showAllProducts ? filteredProducts : filteredProducts.slice(0, VISIBLE_LIMIT);
+
   return (
     <div className="min-h-screen bg-background">
       {/* Header */}
@@ -436,7 +448,7 @@ const Index = () => {
 
             {/* Products Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {filteredProducts.map((product) => (
+              {visibleProducts.map((product) => (
                 <article
                   key={product._id}
                   className="bg-white rounded-2xl shadow-lg overflow-hidden flex flex-col hover:shadow-2xl transform hover:-translate-y-1 transition p-0 h-full min-w-0"
@@ -467,9 +479,9 @@ const Index = () => {
                       </div>
                     )}
 
-                    {/* Make category text smaller */}
+                    {/* Make category text lowercase */}
                     <div className="absolute top-3 left-3">
-                      <Badge className="uppercase text-[10px] px-2 py-0.5">{product.category || "Uncategorized"}</Badge>
+                      <Badge className="uppercase text-[10px] px-2 py-0.5">{(product.category || "uncategorized").toLowerCase()}</Badge>
                     </div>
                     {product.stock <= 0 && (
                       <div className="absolute top-3 right-3 bg-red-600 text-white text-xs font-semibold px-2 py-1 rounded">Out of stock</div>
@@ -523,7 +535,19 @@ const Index = () => {
             </div>
 
             <div className="text-center mt-12">
-              <Button variant="outline" size="lg">View All Products</Button>
+              {filteredProducts.length > VISIBLE_LIMIT ? (
+                <Button
+                  variant="outline"
+                  size="lg"
+                  onClick={() => setShowAllProducts((v) => !v)}
+                >
+                  {showAllProducts ? "Show Less" : "View All Products"}
+                </Button>
+              ) : (
+                <Button variant="outline" size="lg" disabled>
+                  View All Products
+                </Button>
+              )}
             </div>
           </div>
         </section>
