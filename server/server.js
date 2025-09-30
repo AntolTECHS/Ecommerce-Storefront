@@ -1,4 +1,4 @@
-/* ================== SERVER.JS (fixed for Express 5 CORS) ================== */
+/* ================== SERVER.JS ================== */
 const express = require("express");
 const dotenv = require("dotenv");
 const morgan = require("morgan");
@@ -29,17 +29,16 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-/* ================== CORS / ALLOWED ORIGINS ================== */
+/* ================== CORS ================== */
 const allowedOrigins = [
   "http://localhost:5173", // local dev
-  process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production
-  // Add "https://www.techstore-tau.vercel.app" if needed
+  "https://techstore-tau.vercel.app", // production
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    console.log("🔍 CORS origin:", origin); // Debug log
-    if (!origin) return callback(null, true); // allow curl / server-to-server
+    console.log("🔍 CORS origin:", origin);
+    if (!origin) return callback(null, true); // allow server-to-server / curl
     if (allowedOrigins.includes(origin)) return callback(null, true);
     return callback(new Error("Not allowed by CORS: " + origin));
   },
@@ -52,10 +51,9 @@ const corsOptions = {
 
 // Apply global CORS
 app.use(cors(corsOptions));
-// ✅ Fixed for Express 5: use RegExp instead of "/api/*"
 app.options(/^\/api\/.*$/, cors(corsOptions));
 
-/* ================== LOGGER (dev) ================== */
+/* ================== LOGGER ================== */
 if (process.env.NODE_ENV === "development") {
   app.use(morgan("dev"));
 }
@@ -67,13 +65,11 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 const staticUploadsOptions = {
-  setHeaders: (res, filePath, stat) => {
-    const frontend = process.env.FRONTEND_URL || allowedOrigins[0] || "*";
+  setHeaders: (res) => {
+    const frontend = "https://techstore-tau.vercel.app";
     res.setHeader("Access-Control-Allow-Origin", frontend);
     res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-    if (frontend !== "*") {
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-    }
+    res.setHeader("Access-Control-Allow-Credentials", "true");
   },
 };
 
@@ -109,7 +105,7 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: function (origin, callback) {
-      console.log("🔍 Socket.IO CORS origin:", origin); // Debug log
+      console.log("🔍 Socket.IO CORS origin:", origin);
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
       return callback(new Error("Not allowed by CORS: " + origin));
