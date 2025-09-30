@@ -32,6 +32,7 @@ export default function AdminDashboard() {
       "Cameras & Imaging",
       "Office & Productivity",
       "Software & Services",
+      "Networking"
     ],
     []
   );
