@@ -81,23 +81,25 @@ export default function AdminDashboard() {
     return () => {
       // revoke all created urls on unmount
       try {
-        objectUrlMapRef.current && objectUrlMapRef.current.forEach && objectUrlMapRef.current.forEach((v, k) => {
-          try { URL.revokeObjectURL(v); } catch (e) { /* ignore */ }
-        });
+        const wm = objectUrlMapRef.current;
+        if (wm && typeof wm.forEach === "function") {
+          wm.forEach((v) => {
+            try { URL.revokeObjectURL(v); } catch (e) { /* ignore */ }
+          });
+        }
       } catch (e) {
-        // WeakMap doesn't have forEach in some engines — so iterate differently is not possible; best-effort revoke occurs when we create urls below
+        // best-effort only
       }
     };
   }, []);
 
   const createObjectUrlForFile = (file) => {
     if (!file) return null;
-    // WeakMap keys are objects; files are fine
     const existing = objectUrlMapRef.current.get(file);
     if (existing) return existing;
     try {
       const url = URL.createObjectURL(file);
-      objectUrlMapRef.current.set(file, url);
+      try { objectUrlMapRef.current.set(file, url); } catch (e) { /* ignore */ }
       return url;
     } catch (e) {
       return null;
@@ -216,10 +218,40 @@ export default function AdminDashboard() {
     return d;
   };
 
-  // convenience to show toast + fallback
-  const showToast = (opts) => {
-    if (toast) return toast(opts);
-    if (opts?.title) window.alert(opts.title + (opts.description ? ` - ${opts.description}` : ""));
+  // Robust showToast helper that tries multiple call shapes and falls back to alert
+  const showToast = (opts = {}) => {
+    const { title = "", description = "", variant = "default", duration } = opts;
+
+    // If `toast` is a function (common with shadcn/ui), call with an object
+    if (typeof toast === "function") {
+      try {
+        toast({ title, description, variant, duration });
+        return;
+      } catch (e) {
+        try {
+          // alternative call signature
+          toast(title, { description, variant, duration });
+          return;
+        } catch (e2) {
+          console.debug("toast call attempts failed", e, e2);
+        }
+      }
+    }
+
+    // If toast is an object with show (some libs use this)
+    if (toast && typeof toast.show === "function") {
+      try {
+        toast.show({ title, description, variant, duration });
+        return;
+      } catch (e) {
+        console.debug("toast.show failed", e);
+      }
+    }
+
+    // Final fallback to alert
+    if (title) {
+      window.alert(title + (description ? `\n\n${description}` : ""));
+    }
   };
 
   // Fetch admin data (initial)
@@ -387,6 +419,7 @@ export default function AdminDashboard() {
       });
 
       const newProduct = unwrapResource(res) || res.data || res;
+      const productName = name || (newProduct && (newProduct.name || newProduct.title)) || "Product";
       if (newProduct) setProducts((prev) => [...prev, newProduct]);
 
       setName("");
@@ -396,7 +429,8 @@ export default function AdminDashboard() {
       setDescription("");
       setImages([]);
       if (addFileInputRef.current) addFileInputRef.current.value = "";
-      showToast({ title: "Product added successfully!" });
+
+      showToast({ title: "Product added", description: `${productName} added successfully.`, variant: "success" });
     } catch (err) {
       console.error("Add product error", err);
       showToast({ title: err?.response?.data?.message || "Failed to add product", variant: "destructive" });
@@ -469,7 +503,10 @@ export default function AdminDashboard() {
 
       const updated = unwrapResource(res) || res.data || res;
       if (updated) setProducts((prev) => prev.map((p) => (String(p._id || p.id) === String(id) ? updated : p)));
-      showToast({ title: "Product updated successfully!" });
+
+      const updatedName = (updated && (updated.name || updated.title)) || editName || "Product";
+      showToast({ title: "Product updated", description: `${updatedName} updated successfully.`, variant: "success" });
+
       handleCancelEdit();
     } catch (err) {
       console.error("Update product error", err);
