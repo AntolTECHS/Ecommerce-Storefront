@@ -51,6 +51,32 @@ export default function AdminDashboard() {
   const mountedRef = useRef(true);
   const { toast } = useToast();
 
+  // In-app notification banner (fallback when toast isn't showing)
+  const [banner, setBanner] = useState(null); // { message, variant }
+  const bannerTimerRef = useRef(null);
+
+  const notify = (message, variant = "info", ms = 4000) => {
+    // Clear existing timer
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+      bannerTimerRef.current = null;
+    }
+    setBanner({ message, variant });
+    bannerTimerRef.current = setTimeout(() => {
+      setBanner(null);
+      bannerTimerRef.current = null;
+    }, ms);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current);
+        bannerTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Prefer explicit env var name(s), otherwise fall back to current frontend origin.
   const _envBase = (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "").replace(/\/$/, "");
   const inferredBase = (typeof window !== "undefined" && window.location?.origin) ? window.location.origin : "http://localhost:5000";
@@ -329,6 +355,7 @@ export default function AdminDashboard() {
           if (newLen !== prevLen) {
             if (newLen > prevLen) {
               showToast({ title: "New message received", description: `${newLen - prevLen} new message(s)` });
+              notify(`${newLen - prevLen} new message(s)`, "info");
             }
             return m;
           }
@@ -357,9 +384,11 @@ export default function AdminDashboard() {
       await API.delete(`/contact/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setMessages((prev) => (Array.isArray(prev) ? prev.filter((m) => String(m._id || m.id) !== String(id)) : prev));
       showToast({ title: "Message deleted" });
+      notify("Message deleted", "info");
     } catch (err) {
       console.error("Delete message error:", err);
       showToast({ title: "Failed to delete message", variant: "destructive" });
+      notify("Failed to delete message", "destructive");
     }
   };
 
@@ -371,9 +400,11 @@ export default function AdminDashboard() {
       await API.delete(`/admin/users/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setUsers((prev) => (Array.isArray(prev) ? prev.filter((u) => String(u._id || u.id) !== String(id)) : prev));
       showToast({ title: "User deleted" });
+      notify("User deleted", "info");
     } catch (err) {
       console.error("Delete user error:", err);
       showToast({ title: "Failed to delete user", variant: "destructive" });
+      notify("Failed to delete user", "destructive");
     }
   };
 
@@ -386,10 +417,12 @@ export default function AdminDashboard() {
       await API.delete(`/admin/orders/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setOrders((prev) => (Array.isArray(prev) ? prev.filter((o) => String(o._id || o.id) !== String(id)) : prev));
       showToast({ title: "Order deleted" });
+      notify("Order deleted", "info");
     } catch (err) {
       console.error("Delete order error:", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to delete order";
       showToast({ title: "Failed to delete order", description: msg, variant: "destructive" });
+      notify("Failed to delete order", "destructive");
     }
   };
 
@@ -398,6 +431,7 @@ export default function AdminDashboard() {
     const imagesCount = images?.length ?? 0;
     if (!name || !price || !category || !stock || imagesCount === 0) {
       showToast({ title: "Validation", description: "All fields and at least one image are required." });
+      notify("All fields and at least one image are required.", "destructive");
       return;
     }
 
@@ -431,9 +465,12 @@ export default function AdminDashboard() {
       if (addFileInputRef.current) addFileInputRef.current.value = "";
 
       showToast({ title: "Product added", description: `${productName} added successfully.`, variant: "success" });
+      notify(`${productName} added successfully.`, "success");
     } catch (err) {
       console.error("Add product error", err);
-      showToast({ title: err?.response?.data?.message || "Failed to add product", variant: "destructive" });
+      const msg = err?.response?.data?.message || "Failed to add product";
+      showToast({ title: msg, variant: "destructive" });
+      notify(msg, "destructive");
     }
   };
 
@@ -445,9 +482,12 @@ export default function AdminDashboard() {
       await API.delete(`/admin/products/${id}`, { headers: { Authorization: `Bearer ${token}` } });
       setProducts((prev) => prev.filter((p) => String(p._id || p.id) !== String(id)));
       showToast({ title: "Product deleted." });
+      notify("Product deleted", "info");
     } catch (err) {
       console.error("Delete product error", err);
-      showToast({ title: err?.response?.data?.message || "Failed to delete product", variant: "destructive" });
+      const msg = err?.response?.data?.message || "Failed to delete product";
+      showToast({ title: msg, variant: "destructive" });
+      notify(msg, "destructive");
     }
   };
 
@@ -480,6 +520,7 @@ export default function AdminDashboard() {
   const handleUpdateProduct = async (id) => {
     if (!editName || !editPrice || !editCategory || !editStock) {
       showToast({ title: "Validation", description: "Name, price, category and stock are required." });
+      notify("Name, price, category and stock are required.", "destructive");
       return;
     }
 
@@ -506,11 +547,14 @@ export default function AdminDashboard() {
 
       const updatedName = (updated && (updated.name || updated.title)) || editName || "Product";
       showToast({ title: "Product updated", description: `${updatedName} updated successfully.`, variant: "success" });
+      notify(`${updatedName} updated successfully.`, "success");
 
       handleCancelEdit();
     } catch (err) {
       console.error("Update product error", err);
-      showToast({ title: err?.response?.data?.message || "Failed to update product", variant: "destructive" });
+      const msg = err?.response?.data?.message || "Failed to update product";
+      showToast({ title: msg, variant: "destructive" });
+      notify(msg, "destructive");
     }
   };
 
@@ -526,10 +570,12 @@ export default function AdminDashboard() {
       const updated = unwrapResource(res) || res.data || res;
       setOrders((prev) => prev.map(o => (String(o._id || o.id) === String(orderId) ? updated : o)));
       showToast({ title: "Order marked as paid" });
+      notify("Order marked as paid", "info");
     } catch (err) {
       console.error("Mark paid error:", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to mark as paid";
       showToast({ title: "Failed to mark as paid", description: msg, variant: "destructive" });
+      notify(msg, "destructive");
     }
   };
 
@@ -545,10 +591,12 @@ export default function AdminDashboard() {
       const updated = unwrapResource(res) || res.data || res;
       setOrders((prev) => prev.map(o => (String(o._id || o.id) === String(orderId) ? updated : o)));
       showToast({ title: "Order marked as delivered" });
+      notify("Order marked as delivered", "info");
     } catch (err) {
       console.error("Mark delivered error:", err);
       const msg = err?.response?.data?.message || err?.message || "Failed to mark as delivered";
       showToast({ title: "Failed to mark as delivered", description: msg, variant: "destructive" });
+      notify(msg, "destructive");
     }
   };
 
@@ -991,6 +1039,24 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
+      {/* Notification banner (top-right) */}
+      {banner && (
+        <div className="fixed top-6 right-6 z-60">
+          <div
+            role="status"
+            aria-live="polite"
+            className={`max-w-md px-4 py-2 rounded-lg shadow-lg text-sm font-medium border ${
+              banner.variant === "success" ? "bg-green-50 text-green-800 border-green-200" :
+              banner.variant === "destructive" ? "bg-red-50 text-red-800 border-red-200" :
+              banner.variant === "info" ? "bg-sky-50 text-sky-800 border-sky-200" :
+              "bg-gray-50 text-gray-800 border-gray-200"
+            }`}
+          >
+            {banner.message}
+          </div>
+        </div>
+      )}
+
       <header className="sticky top-0 z-50 bg-gradient-to-r from-gray-800 via-gray-900 to-black shadow-md">
         <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row items-center justify-between">
           <h2 className="text-2xl font-bold text-white tracking-wide mb-3 md:mb-0 text-center md:text-left">Admin Dashboard</h2>
