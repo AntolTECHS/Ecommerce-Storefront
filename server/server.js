@@ -1,4 +1,4 @@
-/* ================== SERVER.JS (fixed) ================== */
+/* ================== SERVER.JS (fixed with CORS preflight) ================== */
 const express = require("express");
 const dotenv = require("dotenv");
 const morgan = require("morgan");
@@ -32,15 +32,16 @@ app.use(express.urlencoded({ extended: true }));
 /* ================== CORS / ALLOWED ORIGINS ================== */
 const allowedOrigins = [
   "http://localhost:5173", // local dev
-  process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production (override with FRONTEND_URL)
+  process.env.FRONTEND_URL || "https://techstore-tau.vercel.app", // production
+  // If needed, add "https://www.techstore-tau.vercel.app"
 ];
 
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (e.g., curl, server-to-server)
-    if (!origin) return callback(null, true);
+    console.log("🔍 CORS origin:", origin); // Debug log
+    if (!origin) return callback(null, true); // allow curl / server-to-server
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error("Not allowed by CORS"));
+    return callback(new Error("Not allowed by CORS: " + origin));
   },
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
@@ -51,8 +52,8 @@ const corsOptions = {
 
 // Apply global CORS
 app.use(cors(corsOptions));
-// NOTE: removed explicit app.options('*', cors(corsOptions)); because '*' causes path-to-regexp error
-// Global app.use(cors(...)) handles OPTIONS preflight automatically.
+// Explicitly handle OPTIONS preflight for API routes
+app.options("/api/*", cors(corsOptions));
 
 /* ================== LOGGER (dev) ================== */
 if (process.env.NODE_ENV === "development") {
@@ -108,9 +109,10 @@ const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
     origin: function (origin, callback) {
+      console.log("🔍 Socket.IO CORS origin:", origin); // Debug log
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("Not allowed by CORS"));
+      return callback(new Error("Not allowed by CORS: " + origin));
     },
     credentials: true,
   },
