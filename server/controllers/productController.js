@@ -3,7 +3,7 @@
 
 const Product = require('../models/Product');
 const { cloudinary } = require('../config/cloudinary'); // ensure this exports cloudinary
-const url = require('url');
+// const url = require('url'); // not required but left commented if you need it later
 
 /**
  * Helper: normalize image entries (string or object) to absolute URLs
@@ -86,46 +86,117 @@ const fileToImageObject = (file) => {
   return { url: imgUrl, public_id };
 };
 
+/**
+ * transformCloudinaryUrl(url, options)
+ * - If the URL is a Cloudinary URL that contains "/upload/", insert a transformation string.
+ * - options: { width, height, crop = 'fill', quality = 'auto', format = 'auto' }
+ * - If url is not a cloudinary URL, returns it unchanged.
+ */
+const transformCloudinaryUrl = (urlStr, { width, height, crop = 'fill', quality = 'auto', format = 'auto' } = {}) => {
+  if (!urlStr || typeof urlStr !== 'string') return urlStr;
+  try {
+    if (!/res\.cloudinary\.com/i.test(urlStr) || !urlStr.includes('/upload/')) return urlStr;
+
+    const transformationParts = [];
+    if (width) transformationParts.push(`w_${width}`);
+    if (height) transformationParts.push(`h_${height}`);
+    if (crop) transformationParts.push(`c_${crop}`);
+    if (quality) transformationParts.push(`q_${quality}`);
+    if (format) transformationParts.push(`f_${format}`);
+
+    const transformation = transformationParts.length ? transformationParts.join(',') + '/' : '';
+    return urlStr.replace('/upload/', `/upload/${transformation}`);
+  } catch (_) {
+    return urlStr;
+  }
+};
+
 /* ================== CONTROLLERS ================== */
 
-// @desc Get all products
-// @route GET /api/products
-// @access Public
+/**
+ * GET /api/products
+ * Paginated list of products. Query params: page, limit
+ * Returns: { products, page, pages, total }
+ */
 const getProducts = async (req, res) => {
   try {
-    const products = await Product.find({});
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20)); // clamp 1..100
+    const skip = (page - 1) * limit;
+
+    // fetch page of products + total count in parallel
+    const [products, total] = await Promise.all([
+      Product.find({})
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(), // lean for faster read-only objects
+      Product.countDocuments(),
+    ]);
+
     const productsWithFullUrls = products.map((p) => {
+      // buildImageUrls returns absolute URL strings
       const imgs = buildImageUrls(req, p.images);
+
+      // produce small thumbnails for listing (Cloudinary optimized)
+      const thumbnails = imgs.map((u) => transformCloudinaryUrl(u, { width: 400, height: 400, crop: 'fill' }));
+
       return {
-        ...p._doc,
-        // Keep stored structure (objects) but return URL strings for convenience in `images` field
-        images: imgs,
-        image: imgs.length ? imgs[0] : (p.image ? pickPrimaryImage(req, [], p.image) : null),
+        // minimal payload for list view - include essential fields only to reduce response size
+        _id: p._id,
+        name: p.name,
+        price: p.price,
+        category: p.category,
+        stock: p.stock,
+        rating: p.rating ?? 0,
+        numReviews: p.numReviews ?? 0,
+        images: thumbnails, // array of thumbnail URLs
+        image: thumbnails.length ? thumbnails[0] : null, // primary thumbnail
+        createdAt: p.createdAt,
+        updatedAt: p.updatedAt,
       };
     });
-    res.json(productsWithFullUrls);
+
+    res.json({
+      products: productsWithFullUrls,
+      page,
+      pages: Math.ceil(total / limit),
+      total,
+    });
   } catch (error) {
     console.error('getProducts error:', error);
     res.status(500).json({ message: error.message });
   }
 };
 
-// @desc Get single product
-// @route GET /api/products/:id
-// @access Public
+/**
+ * GET /api/products/:id
+ * Single product with larger images suitable for product page.
+ */
 const getProductById = async (req, res) => {
   try {
-    const product = await Product.findById(req.params.id);
-    if (product) {
-      const imgs = buildImageUrls(req, product.images);
-      res.json({
-        ...product._doc,
-        images: imgs,
-        image: imgs.length ? imgs[0] : (product.image ? pickPrimaryImage(req, [], product.image) : null),
-      });
-    } else {
-      res.status(404).json({ message: 'Product not found' });
-    }
+    const product = await Product.findById(req.params.id).lean();
+    if (!product) return res.status(404).json({ message: 'Product not found' });
+
+    const imgs = buildImageUrls(req, product.images);
+
+    // For product page, deliver medium/full sized images (but optimized)
+    const optimized = imgs.map((u) => transformCloudinaryUrl(u, { width: 1200, quality: 'auto' }));
+
+    res.json({
+      _id: product._id,
+      name: product.name,
+      description: product.description,
+      price: product.price,
+      category: product.category,
+      stock: product.stock,
+      rating: product.rating ?? 0,
+      numReviews: product.numReviews ?? 0,
+      images: optimized,
+      image: optimized.length ? optimized[0] : null,
+      createdAt: product.createdAt,
+      updatedAt: product.updatedAt,
+    });
   } catch (error) {
     console.error('getProductById error:', error);
     res.status(500).json({ message: error.message });
@@ -179,7 +250,7 @@ const createProduct = async (req, res) => {
     const imgs = buildImageUrls(req, createdProduct.images);
 
     res.status(201).json({
-      ...createdProduct._doc,
+      ...createdProduct,
       images: imgs,
       image: imgs.length ? imgs[0] : null,
     });

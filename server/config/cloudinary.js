@@ -2,6 +2,7 @@
 const cloudinary = require("cloudinary").v2;
 const { CloudinaryStorage } = require("multer-storage-cloudinary");
 const multer = require("multer");
+const path = require("path");
 
 // Configure Cloudinary using env vars
 cloudinary.config({
@@ -13,15 +14,25 @@ cloudinary.config({
 // CloudinaryStorage configuration
 const storage = new CloudinaryStorage({
   cloudinary,
-  params: {
-    folder: "techstore", // change if you want a different folder
-    allowed_formats: ["jpg", "png", "jpeg", "webp"],
-    // You can also set transformation presets here if desired, e.g.:
-    // transformation: [{ width: 1200, crop: "limit" }]
+  params: (req, file) => {
+    // sanitize original name and create predictable public_id
+    const orig = file.originalname || "file";
+    const base = path.parse(orig).name.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_-]/g, "");
+    const timestamp = Date.now();
+    const public_id = `techstore/${base}-${timestamp}`;
+
+    return {
+      folder: "techstore",
+      public_id,
+      allowed_formats: ["jpg", "jpeg", "png", "webp"],
+      format: "auto",      // let Cloudinary auto-select best format
+      // optional default transformation for upload (you can omit)
+      // transformation: [{ quality: "auto" }],
+    };
   },
 });
 
-// Multer fileFilter - allow only image mimetypes
+// Multer fileFilter - allow only image mimetypes (extra extension check not required here)
 const fileFilter = (req, file, cb) => {
   if (/^image\//.test(file.mimetype)) {
     cb(null, true);
@@ -33,7 +44,7 @@ const fileFilter = (req, file, cb) => {
 // Multer upload instance with size limit + fileFilter
 const upload = multer({
   storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB per file (adjust as needed)
+  limits: { fileSize: 6 * 1024 * 1024 }, // 6 MB per file (adjust as needed)
   fileFilter,
 });
 
