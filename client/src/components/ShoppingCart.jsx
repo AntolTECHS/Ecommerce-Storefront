@@ -12,8 +12,8 @@ import { useNavigate } from "react-router-dom";
  * Props:
  *  - isOpen: boolean
  *  - onClose: fn
- *  - items: array [{ _id|id, name, price, quantity, image, images }]   <-- legacy
- *  - cartItems: array [...]                                              <-- Index.jsx passes this name
+ *  - items: array [{ _id|id, name, price, quantity, image, images }]
+ *  - cartItems: array [...] (preferred)
  *  - onUpdateQuantity: fn(productId, newQuantity)
  *  - onRemoveItem: fn(productId)
  *  - isLoggedIn: boolean
@@ -35,22 +35,25 @@ export const ShoppingCart = ({
   const routerNavigate = useNavigate();
   const nav = navigate || routerNavigate;
 
-  // Prefer cartItems if provided (Index uses cartItems={cartItems})
-  const itemsToRender = Array.isArray(cartItems) ? cartItems : Array.isArray(items) ? items : [];
+  const itemsToRender = Array.isArray(cartItems)
+    ? cartItems
+    : Array.isArray(items)
+    ? items
+    : [];
 
-  // debug helper (remove in production)
   // eslint-disable-next-line no-console
   console.debug("[ShoppingCart] rendering with items count:", itemsToRender.length);
 
-  // Harmonize API_BASE with Index.jsx (prefers VITE_API_URL then VITE_API_BASE_URL)
-  const rawApiBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
-  const API_BASE = String(rawApiBase).replace(/^http:\/\//, "https://").replace(/\/$/, "");
+  const rawApiBase =
+    import.meta.env.VITE_API_URL ||
+    import.meta.env.VITE_API_BASE_URL ||
+    "http://localhost:5000";
+  const API_BASE = String(rawApiBase)
+    .replace(/^http:\/\//, "https://")
+    .replace(/\/$/, "");
 
-  // Helper: resolve various shapes the backend might return for images
   const getImageUrl = (imgOrItem) => {
     if (!imgOrItem) return "/placeholder.png";
-
-    // if passed the whole item object, try common fields
     if (typeof imgOrItem === "object" && !(typeof imgOrItem === "string")) {
       const item = imgOrItem;
       const cand =
@@ -61,10 +64,8 @@ export const ShoppingCart = ({
         item.path ||
         item.filename;
       if (!cand) return "/placeholder.png";
-      return getImageUrl(cand); // recurse with string/object
+      return getImageUrl(cand);
     }
-
-    // if it's a File/Blob (rare in cart but keep safe)
     if (typeof File !== "undefined" && imgOrItem instanceof File) {
       try {
         return URL.createObjectURL(imgOrItem);
@@ -72,39 +73,46 @@ export const ShoppingCart = ({
         return "/placeholder.png";
       }
     }
-
-    // string cases
     if (typeof imgOrItem === "string") {
       const str = imgOrItem;
       if (str.startsWith("http") || str.startsWith("//")) return str;
-      // handle relative paths e.g. "/uploads/xxx.jpg" or "uploads/xxx.jpg"
       if (str.startsWith("/")) return `${API_BASE}${str}`;
       return `${API_BASE}/${str.replace(/^\/+/, "")}`;
     }
-
     return "/placeholder.png";
   };
 
-  // Currency formatting: prefer passed formatPrice, otherwise fallback to KSH-like formatting
   const formatCurrency = (value) => {
     if (typeof formatPrice === "function") return formatPrice(value);
     const amount = Number(value) || 0;
     try {
-      const formatted = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+      const formatted = new Intl.NumberFormat("en-KE", {
+        style: "currency",
+        currency: "KES",
+      }).format(amount);
       return formatted.replace(/KES/g, "KSH");
     } catch {
       return `KSH ${amount.toFixed(2)}`;
     }
   };
 
-  const subtotal = itemsToRender.reduce((sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0), 0);
-  const tax = subtotal * 0.1; // 10% tax
+  const subtotal = itemsToRender.reduce(
+    (sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0),
+    0
+  );
+  const tax = subtotal * 0.1;
   const total = subtotal + tax;
 
   if (!isOpen) return null;
 
   const handleCheckout = () => {
-    if (!isLoggedIn) {
+    // ✅ safer: check both prop and localStorage
+    const logged =
+      typeof isLoggedIn === "boolean"
+        ? isLoggedIn
+        : Boolean(localStorage.getItem("token"));
+
+    if (!logged) {
       toast?.({
         title: "Login required",
         description: "Please log in to complete checkout",
@@ -115,6 +123,7 @@ export const ShoppingCart = ({
       }, 200);
       return;
     }
+
     nav?.("/checkout");
   };
 
@@ -123,22 +132,25 @@ export const ShoppingCart = ({
       className="fixed inset-0 z-50 flex items-stretch"
       aria-hidden={isOpen ? "false" : "true"}
     >
-      {/* backdrop */}
-      <div className="absolute inset-0 bg-black/45 backdrop-blur-sm" onClick={onClose} />
+      <div
+        className="absolute inset-0 bg-black/45 backdrop-blur-sm"
+        onClick={onClose}
+      />
 
-      {/* panel */}
       <aside className="relative ml-auto w-full max-w-md lg:max-w-lg h-full bg-white shadow-2xl">
         <Card className="h-full rounded-none border-0 flex flex-col">
-          {/* Header */}
           <CardHeader className="flex items-center justify-between gap-4 px-5 py-4 border-b">
             <div className="flex items-center gap-3">
               <div className="rounded-md bg-indigo-50 p-2">
                 <ShoppingBag className="h-5 w-5 text-indigo-600" />
               </div>
               <div>
-                <CardTitle className="text-base font-semibold">Shopping Cart</CardTitle>
+                <CardTitle className="text-base font-semibold">
+                  Shopping Cart
+                </CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  {itemsToRender.length} item{itemsToRender.length !== 1 ? "s" : ""}
+                  {itemsToRender.length} item
+                  {itemsToRender.length !== 1 ? "s" : ""}
                 </p>
               </div>
             </div>
@@ -160,7 +172,6 @@ export const ShoppingCart = ({
             </div>
           </CardHeader>
 
-          {/* Body */}
           <CardContent className="flex-1 p-4 overflow-auto">
             {itemsToRender.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-4 py-12">
@@ -169,14 +180,16 @@ export const ShoppingCart = ({
                 </div>
                 <div className="text-center">
                   <h3 className="text-lg font-semibold">Your cart is empty</h3>
-                  <p className="text-sm text-muted-foreground">Add some products to get started.</p>
+                  <p className="text-sm text-muted-foreground">
+                    Add some products to get started.
+                  </p>
                 </div>
               </div>
             ) : (
               <div className="space-y-4">
                 {itemsToRender.map((item) => {
-                  const id = item._id || item.id || item.sku || String(item._tempId || "");
-
+                  const id =
+                    item._id || item.id || item.sku || String(item._tempId || "");
                   const imgSrc = getImageUrl(item);
 
                   return (
@@ -189,7 +202,9 @@ export const ShoppingCart = ({
                           src={imgSrc}
                           alt={item.name}
                           className="w-full h-full object-cover"
-                          onError={(e) => (e.currentTarget.src = "/placeholder.png")}
+                          onError={(e) =>
+                            (e.currentTarget.src = "/placeholder.png")
+                          }
                         />
                       </div>
 
@@ -204,7 +219,6 @@ export const ShoppingCart = ({
                           </div>
 
                           <div className="flex items-center gap-3">
-                            {/* Quantity controls */}
                             <div className="flex items-center gap-2 bg-gray-50 border rounded-md px-1">
                               <button
                                 aria-label={`Decrease quantity of ${item.name}`}
@@ -219,12 +233,16 @@ export const ShoppingCart = ({
                                 <Minus className="h-4 w-4" />
                               </button>
 
-                              <div className="text-sm w-8 text-center">{item.quantity}</div>
+                              <div className="text-sm w-8 text-center">
+                                {item.quantity}
+                              </div>
 
                               <button
                                 aria-label={`Increase quantity of ${item.name}`}
                                 className="p-1 rounded-sm hover:bg-gray-100"
-                                onClick={() => onUpdateQuantity?.(id, (item.quantity || 0) + 1)}
+                                onClick={() =>
+                                  onUpdateQuantity?.(id, (item.quantity || 0) + 1)
+                                }
                               >
                                 <Plus className="h-4 w-4" />
                               </button>
@@ -244,7 +262,6 @@ export const ShoppingCart = ({
                 })}
 
                 <Separator />
-                {/* Summary */}
                 <div className="text-sm space-y-2">
                   <div className="flex justify-between text-muted-foreground">
                     <span>Subtotal</span>
@@ -264,7 +281,6 @@ export const ShoppingCart = ({
             )}
           </CardContent>
 
-          {/* Footer */}
           <div className="p-4 border-t bg-white">
             {itemsToRender.length > 0 ? (
               <div className="space-y-3">

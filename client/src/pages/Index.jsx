@@ -467,23 +467,20 @@ const Index = () => {
                 </article>
               ))}
             </div>
-            {filteredProducts.length > VISIBLE_LIMIT && !showAllProducts && (
-              <div className="text-center mt-8">
+            {!showAllProducts && filteredProducts.length > VISIBLE_LIMIT && (
+              <div className="flex justify-center mt-8">
                 <Button
-                  variant="outline"
                   onClick={() => setShowAllProducts(true)}
-                  className="rounded-full px-6"
+                  className="bg-blue-600 hover:bg-blue-700 text-white rounded-lg px-6 py-2"
                 >
-                  Show More
+                  View All Products
                 </Button>
               </div>
-            )}
-            {filteredProducts.length === 0 && (
-              <p className="text-center text-gray-500 mt-8">No products found.</p>
             )}
           </div>
         </section>
       </main>
+
       <ShoppingCart
         isOpen={isCartOpen}
         onClose={() => setIsCartOpen(false)}
@@ -491,50 +488,56 @@ const Index = () => {
         onUpdateQuantity={handleUpdateQuantity}
         onRemoveItem={handleRemoveItem}
         formatPrice={formatKSH}
+        isLoggedIn={isLoggedIn}   // ✅ now passed
+        navigate={navigate}       // ✅ now passed
       />
+
+      {/* Image Modal */}
       {imageModalOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-80 flex flex-col items-center justify-center z-50 p-4"
-          onClick={() => setImageModalOpen(false)}
-        >
-          <div
-            className="bg-white rounded-lg p-2 max-w-3xl w-full relative"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex justify-between items-center mb-2">
-              <h2 className="text-lg font-semibold">Product Image</h2>
-              <button
-                onClick={() => setImageModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="flex justify-center items-center">
-              <img
-                src={modalImage || "/placeholder.png"}
-                alt="Product"
-                className={`object-contain transition-all ${
-                  modalExpanded ? "max-h-[80vh]" : "max-h-96"
-                }`}
+        <div className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg max-w-4xl w-full relative">
+            <button
+              onClick={() => setImageModalOpen(false)}
+              className="absolute top-3 right-3 bg-gray-200 rounded-full p-2 hover:bg-gray-300 z-10"
+            >
+              <X className="w-5 h-5 text-gray-700" />
+            </button>
+            <div className="p-4 flex flex-col items-center">
+              {modalImage ? (
+                <img
+                  src={modalImage}
+                  alt="Modal"
+                  className={`object-contain transition-all ${
+                    modalExpanded ? "max-h-[80vh]" : "max-h-[60vh]"
+                  }`}
+                  onError={(e) => (e.currentTarget.src = "/placeholder.png")}
+                />
+              ) : (
+                <p className="text-gray-500">No image available</p>
+              )}
+              {modalImages.length > 1 && (
+                <div className="flex gap-2 mt-4 overflow-x-auto pb-2 w-full">
+                  {modalImages.map((src, i) => (
+                    <img
+                      key={i}
+                      src={src}
+                      onClick={() => setModalImage(src)}
+                      alt={`Thumbnail ${i + 1}`}
+                      className={`h-20 object-contain cursor-pointer border rounded ${
+                        modalImage === src ? "border-blue-500" : "border-gray-200"
+                      }`}
+                      onError={(e) => (e.currentTarget.src = "/placeholder.png")}
+                    />
+                  ))}
+                </div>
+              )}
+              <Button
                 onClick={() => setModalExpanded(!modalExpanded)}
-              />
+                className="mt-4 bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {modalExpanded ? "Shrink" : "Expand"}
+              </Button>
             </div>
-            {modalImages.length > 1 && (
-              <div className="flex gap-2 overflow-x-auto mt-4 pb-2">
-                {modalImages.map((src, i) => (
-                  <img
-                    key={i}
-                    src={src}
-                    alt={`Thumbnail ${i + 1}`}
-                    className={`h-20 w-20 object-cover cursor-pointer rounded border ${
-                      src === modalImage ? "border-blue-500" : "border-gray-300"
-                    }`}
-                    onClick={() => setModalImage(src)}
-                  />
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
