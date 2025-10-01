@@ -174,60 +174,6 @@ const Index = () => {
     return "/placeholder.png";
   };
 
-  // ----- New helper: robustly get product description (handles many shapes) -----
-  const stripHtml = (html) => {
-    if (typeof html !== "string") return "";
-    return html.replace(/<\/?[^>]+(>|$)/g, "").trim();
-  };
-
-  const normalizeToString = (val) => {
-    if (val == null) return "";
-    if (Array.isArray(val)) return val.join(", ");
-    if (typeof val === "object") {
-      // attempt common object shapes
-      if (typeof val.text === "string") return val.text;
-      if (typeof val.content === "string") return val.content;
-      if (typeof val.value === "string") return val.value;
-      // fallback to JSON brief
-      try {
-        return JSON.stringify(val);
-      } catch {
-        return String(val);
-      }
-    }
-    return String(val);
-  };
-
-  const getDescription = (p) => {
-    if (!p) return null;
-    const candidates = [
-      p.description,
-      p.short_description,
-      p.shortDescription,
-      p.summary,
-      p.details,
-      p.features,
-      p.desc,
-      p.long_description,
-      p.content,
-    ];
-    for (const c of candidates) {
-      const s = normalizeToString(c).trim();
-      if (s) return stripHtml(s);
-    }
-    // sometimes description may be nested under "meta" or "attributes"
-    if (p.meta && (p.meta.description || p.meta.desc)) {
-      const s = normalizeToString(p.meta.description || p.meta.desc).trim();
-      if (s) return stripHtml(s);
-    }
-    if (p.attributes && p.attributes.description) {
-      const s = normalizeToString(p.attributes.description).trim();
-      if (s) return stripHtml(s);
-    }
-    return null;
-  };
-  // ------------------------------------------------------------------------------
-
   // Modal state
   const [imageModalOpen, setImageModalOpen] = useState(false);
   const [modalImage, setModalImage] = useState(null);
@@ -501,7 +447,7 @@ const Index = () => {
                       <div className="min-w-0">
                         <h3 className="text-base sm:text-lg font-semibold mb-1 truncate">{product.name}</h3>
                         <p className="text-xs text-gray-600 mb-3 line-clamp-2">
-                          {getDescription(product) ?? "No description provided."}
+                          {product.description || "No description provided."}
                         </p>
                         <div className="text-xs text-gray-500 mb-2">
                           Stock: {product.stock ?? 0}
