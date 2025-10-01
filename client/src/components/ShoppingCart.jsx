@@ -1,10 +1,10 @@
-// src/components/ShoppingCart.jsx
 import { X, Plus, Minus, ShoppingBag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast.js";
+import { useNavigate } from "react-router-dom";
 
 /**
  * ShoppingCart
@@ -12,32 +12,46 @@ import { useToast } from "@/hooks/use-toast.js";
  * Props:
  *  - isOpen: boolean
  *  - onClose: fn
- *  - items: array [{ _id|id, name, price, quantity, image, images }]
+ *  - items: array [{ _id|id, name, price, quantity, image, images }]   <-- legacy
+ *  - cartItems: array [...]                                              <-- Index.jsx passes this name
  *  - onUpdateQuantity: fn(productId, newQuantity)
  *  - onRemoveItem: fn(productId)
  *  - isLoggedIn: boolean
- *  - navigate: fn (from react-router)
+ *  - navigate: fn (from react-router) optional, will fallback to useNavigate()
+ *  - formatPrice: fn(value) optional - if provided, used to format currency
  */
 export const ShoppingCart = ({
   isOpen,
   onClose,
   items = [],
+  cartItems = undefined,
   onUpdateQuantity,
   onRemoveItem,
   isLoggedIn,
   navigate,
+  formatPrice,
 }) => {
   const { toast } = useToast();
+  const routerNavigate = useNavigate();
+  const nav = navigate || routerNavigate;
 
-  // CHANGED: Resolve backend base for relative image paths
-  const API_BASE = (import.meta.env.VITE_API_BASE_URL || "http://localhost:5000").replace(/\/$/, ""); // CHANGED
+  // Prefer cartItems if provided (Index uses cartItems={cartItems})
+  const itemsToRender = Array.isArray(cartItems) ? cartItems : Array.isArray(items) ? items : [];
 
-  // CHANGED: helper to resolve various shapes the backend might return for images
+  // debug helper (remove in production)
+  // eslint-disable-next-line no-console
+  console.debug("[ShoppingCart] rendering with items count:", itemsToRender.length);
+
+  // Harmonize API_BASE with Index.jsx (prefers VITE_API_URL then VITE_API_BASE_URL)
+  const rawApiBase = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE_URL || "http://localhost:5000";
+  const API_BASE = String(rawApiBase).replace(/^http:\/\//, "https://").replace(/\/$/, "");
+
+  // Helper: resolve various shapes the backend might return for images
   const getImageUrl = (imgOrItem) => {
     if (!imgOrItem) return "/placeholder.png";
 
     // if passed the whole item object, try common fields
-    if (typeof imgOrItem === "object" && !("string" === typeof imgOrItem)) {
+    if (typeof imgOrItem === "object" && !(typeof imgOrItem === "string")) {
       const item = imgOrItem;
       const cand =
         (Array.isArray(item.images) && item.images[0]) ||
@@ -69,15 +83,21 @@ export const ShoppingCart = ({
     }
 
     return "/placeholder.png";
-  }; // CHANGED
-
-  // Use Kenyan Shilling formatting to match your app – change currency if needed
-  const formatKES = (value) => {
-    const amount = Number(value) || 0;
-    return new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
   };
 
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0), 0);
+  // Currency formatting: prefer passed formatPrice, otherwise fallback to KSH-like formatting
+  const formatCurrency = (value) => {
+    if (typeof formatPrice === "function") return formatPrice(value);
+    const amount = Number(value) || 0;
+    try {
+      const formatted = new Intl.NumberFormat("en-KE", { style: "currency", currency: "KES" }).format(amount);
+      return formatted.replace(/KES/g, "KSH");
+    } catch {
+      return `KSH ${amount.toFixed(2)}`;
+    }
+  };
+
+  const subtotal = itemsToRender.reduce((sum, item) => sum + (Number(item.price) || 0) * (item.quantity || 0), 0);
   const tax = subtotal * 0.1; // 10% tax
   const total = subtotal + tax;
 
@@ -91,11 +111,11 @@ export const ShoppingCart = ({
         variant: "destructive",
       });
       setTimeout(() => {
-        navigate?.("/login");
+        nav?.("/login");
       }, 200);
       return;
     }
-    navigate?.("/checkout");
+    nav?.("/checkout");
   };
 
   return (
@@ -118,14 +138,14 @@ export const ShoppingCart = ({
               <div>
                 <CardTitle className="text-base font-semibold">Shopping Cart</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  {items.length} item{items.length !== 1 ? "s" : ""}
+                  {itemsToRender.length} item{itemsToRender.length !== 1 ? "s" : ""}
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <Badge variant="secondary" className="hidden sm:inline-flex">
-                {items.length}
+                {itemsToRender.length}
               </Badge>
 
               <Button
@@ -142,7 +162,7 @@ export const ShoppingCart = ({
 
           {/* Body */}
           <CardContent className="flex-1 p-4 overflow-auto">
-            {items.length === 0 ? (
+            {itemsToRender.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-4 py-12">
                 <div className="p-6 rounded-full bg-gray-100">
                   <ShoppingBag className="h-12 w-12 text-gray-400" />
@@ -154,11 +174,10 @@ export const ShoppingCart = ({
               </div>
             ) : (
               <div className="space-y-4">
-                {items.map((item) => {
-                  const id = item._id || item.id;
+                {itemsToRender.map((item) => {
+                  const id = item._id || item.id || item.sku || String(item._tempId || "");
 
-                  // CHANGED: compute a safe image URL from item (works when cart item has `images` array or `image` or relative path)
-                  const imgSrc = getImageUrl(item); // CHANGED
+                  const imgSrc = getImageUrl(item);
 
                   return (
                     <div
@@ -167,7 +186,7 @@ export const ShoppingCart = ({
                     >
                       <div className="flex-shrink-0 w-20 h-20 rounded-md overflow-hidden bg-gray-50 border">
                         <img
-                          src={imgSrc} // CHANGED
+                          src={imgSrc}
                           alt={item.name}
                           className="w-full h-full object-cover"
                           onError={(e) => (e.currentTarget.src = "/placeholder.png")}
@@ -181,7 +200,7 @@ export const ShoppingCart = ({
 
                         <div className="mt-1 flex items-center justify-between gap-4">
                           <div className="text-sm text-muted-foreground">
-                            {formatKES(item.price)}
+                            {formatCurrency(item.price)}
                           </div>
 
                           <div className="flex items-center gap-3">
@@ -205,7 +224,7 @@ export const ShoppingCart = ({
                               <button
                                 aria-label={`Increase quantity of ${item.name}`}
                                 className="p-1 rounded-sm hover:bg-gray-100"
-                                onClick={() => onUpdateQuantity?.(id, item.quantity + 1)}
+                                onClick={() => onUpdateQuantity?.(id, (item.quantity || 0) + 1)}
                               >
                                 <Plus className="h-4 w-4" />
                               </button>
@@ -229,16 +248,16 @@ export const ShoppingCart = ({
                 <div className="text-sm space-y-2">
                   <div className="flex justify-between text-muted-foreground">
                     <span>Subtotal</span>
-                    <span>{formatKES(subtotal)}</span>
+                    <span>{formatCurrency(subtotal)}</span>
                   </div>
                   <div className="flex justify-between text-muted-foreground">
                     <span>Tax (10%)</span>
-                    <span>{formatKES(tax)}</span>
+                    <span>{formatCurrency(tax)}</span>
                   </div>
                   <Separator />
                   <div className="flex justify-between text-base font-semibold">
                     <span>Total</span>
-                    <span>{formatKES(total)}</span>
+                    <span>{formatCurrency(total)}</span>
                   </div>
                 </div>
               </div>
@@ -247,7 +266,7 @@ export const ShoppingCart = ({
 
           {/* Footer */}
           <div className="p-4 border-t bg-white">
-            {items.length > 0 ? (
+            {itemsToRender.length > 0 ? (
               <div className="space-y-3">
                 <Button
                   className="w-full py-3 rounded-md bg-gradient-to-r from-green-500 to-emerald-600 text-white hover:from-emerald-600 hover:to-green-600"
