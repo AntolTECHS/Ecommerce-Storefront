@@ -21,11 +21,19 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
+  // NEW: inline error state shown under the form
+  const [error, setError] = useState(null);
+
   const handleLogin = async (e) => {
     if (e?.preventDefault) e.preventDefault();
 
+    // reset previous error
+    setError(null);
+
     if (!email || !password) {
-      toast({ title: "All fields required", variant: "destructive" });
+      const msg = "All fields are required";
+      setError(msg);
+      toast({ title: "Missing fields", description: msg, variant: "destructive" });
       return;
     }
 
@@ -34,11 +42,9 @@ export default function Login() {
       const res = await API.post("/auth/login", { email, password });
 
       if (!res.data?.token) {
-        toast({
-          title: "Login failed",
-          description: "No token received",
-          variant: "destructive",
-        });
+        const msg = "Login failed: no token received";
+        setError(msg);
+        toast({ title: "Login failed", description: msg, variant: "destructive" });
         return;
       }
 
@@ -59,18 +65,28 @@ export default function Login() {
         description: `Hello ${user.name || user.email}`,
       });
 
+      // navigate after successful login
       if (user.role?.toLowerCase() === "admin") {
         navigate("/admin/dashboard");
       } else {
         navigate("/");
       }
     } catch (err) {
-      console.error("Login error:", err.response?.data || err.message);
+      // prefer server-provided message when available
+      const serverMsg =
+        err?.response?.data?.message ||
+        (err?.response?.status === 401 ? "Invalid email or password" : null);
+
+      const genericMsg = "Unable to log in. Check your credentials.";
+
+      const finalMsg = serverMsg || genericMsg;
+
+      // set inline error and show toast
+      setError(finalMsg);
+      console.error("Login error:", err?.response?.data || err?.message || err);
       toast({
         title: "Login failed",
-        description:
-          err.response?.data?.message ||
-          "Unable to log in. Check your credentials.",
+        description: finalMsg,
         variant: "destructive",
       });
     } finally {
@@ -83,12 +99,17 @@ export default function Login() {
       <Card className="w-full max-w-md bg-gray-100 shadow-xl animate-fade">
         <form onSubmit={handleLogin} className="space-y-6">
           <CardHeader>
-            <CardTitle className="text-center text-2xl font-bold">
-              Log In
-            </CardTitle>
+            <CardTitle className="text-center text-2xl font-bold">Log In</CardTitle>
           </CardHeader>
 
           <CardContent className="space-y-4">
+            {/* inline error (accessible) */}
+            {error && (
+              <div className="rounded-md bg-red-50 p-2 text-sm text-red-700" role="alert" aria-live="assertive">
+                {error}
+              </div>
+            )}
+
             <Input
               type="email"
               placeholder="Email"
@@ -112,6 +133,7 @@ export default function Login() {
                 type="button"
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600"
                 onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
@@ -128,10 +150,7 @@ export default function Login() {
             </Button>
 
             <p className="text-sm text-center text-zinc-600">
-              <Link
-                to="/forgot-password"
-                className="text-blue-600 hover:underline"
-              >
+              <Link to="/forgot-password" className="text-blue-600 hover:underline">
                 Forgot Password?
               </Link>
             </p>
