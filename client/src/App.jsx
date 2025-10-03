@@ -1,35 +1,38 @@
 // src/App.jsx
+import { Suspense, lazy } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 
-import Index from "./pages/Index.jsx";
-import NotFound from "./pages/NotFound.jsx";
-import Login from "./pages/Login.jsx";
-import Signup from "./pages/SignUp.jsx";
-import ProductDetails from "./pages/ProductDetails.jsx";
-import AdminDashboard from "@/pages/AdminDashboard";
 import ProtectedRoute from "@/components/ProtectedRoute";
 
-// Checkout/order pages
-import Checkout from "@/pages/Checkout.jsx";
-import OrderSuccess from "@/pages/OrderSuccess.jsx";
-import OrderDetails from "@/pages/OrderDetails.jsx";
+// Lazy-load all pages
+const Index = lazy(() => import("./pages/Index.jsx"));
+const NotFound = lazy(() => import("./pages/NotFound.jsx"));
+const Login = lazy(() => import("./pages/Login.jsx"));
+const Signup = lazy(() => import("./pages/SignUp.jsx"));
+const ProductDetails = lazy(() => import("./pages/ProductDetails.jsx"));
+const AdminDashboard = lazy(() => import("@/pages/AdminDashboard"));
 
-// Account pages & layout
-import AccountLayout from "@/pages/account/AccountLayout.jsx";
-import Profile from "@/pages/account/Profile.jsx";
-import MyOrders from "@/pages/account/MyOrders.jsx";
-import Settings from "@/pages/account/Settings.jsx";
+// Checkout/order pages
+const Checkout = lazy(() => import("@/pages/Checkout.jsx"));
+const OrderSuccess = lazy(() => import("@/pages/OrderSuccess.jsx"));
+const OrderDetails = lazy(() => import("@/pages/OrderDetails.jsx"));
+
+// Account pages
+const AccountLayout = lazy(() => import("@/pages/account/AccountLayout.jsx"));
+const Profile = lazy(() => import("@/pages/account/Profile.jsx"));
+const MyOrders = lazy(() => import("@/pages/account/MyOrders.jsx"));
+const Settings = lazy(() => import("@/pages/account/Settings.jsx"));
 
 // Contact page
-import ContactPage from "@/pages/ContactPage.jsx";
+const ContactPage = lazy(() => import("@/pages/ContactPage.jsx"));
 
 // Password reset pages
-import ForgotPassword from "@/pages/ForgotPassword.jsx";
-import ResetPassword from "@/pages/ResetPassword.jsx";
+const ForgotPassword = lazy(() => import("@/pages/ForgotPassword.jsx"));
+const ResetPassword = lazy(() => import("@/pages/ResetPassword.jsx"));
 
 const queryClient = new QueryClient();
 
@@ -39,77 +42,79 @@ const App = () => (
       <Toaster />
       <Sonner />
       <BrowserRouter>
-        <Routes>
-          {/* Public Routes */}
-          <Route path="/" element={<Index />} />
-          <Route path="/product/:id" element={<ProductDetails />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/signup" element={<Signup />} />
-          <Route path="/contact" element={<ContactPage />} />
+        <Suspense fallback={<div className="p-8 text-center">Loading...</div>}>
+          <Routes>
+            {/* Public Routes */}
+            <Route path="/" element={<Index />} />
+            <Route path="/product/:id" element={<ProductDetails />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/signup" element={<Signup />} />
+            <Route path="/contact" element={<ContactPage />} />
 
-          {/* Password reset */}
-          <Route path="/forgot-password" element={<ForgotPassword />} />
-          <Route path="/reset-password/:token" element={<ResetPassword />} />
+            {/* Password reset */}
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password/:token" element={<ResetPassword />} />
 
-          {/* Checkout routes */}
-          <Route path="/checkout" element={<Checkout />} />
-          <Route path="/order-success" element={<OrderSuccess />} />
-          <Route path="/order/:id" element={<OrderDetails />} />
+            {/* Checkout routes */}
+            <Route path="/checkout" element={<Checkout />} />
+            <Route path="/order-success" element={<OrderSuccess />} />
+            <Route path="/order/:id" element={<OrderDetails />} />
 
-          {/* Account routes (protected, nested under /account) */}
-          <Route
-            path="/account/*"
-            element={
-              <ProtectedRoute>
-                <AccountLayout />
-              </ProtectedRoute>
-            }
-          >
-            <Route index element={<Profile />} />             {/* /account -> Profile */}
-            <Route path="profile" element={<Profile />} />   {/* /account/profile */}
-            <Route path="orders" element={<MyOrders />} />   {/* /account/orders */}
-            <Route path="settings" element={<Settings />} /> {/* /account/settings */}
-          </Route>
+            {/* Account routes (protected) */}
+            <Route
+              path="/account/*"
+              element={
+                <ProtectedRoute>
+                  <AccountLayout />
+                </ProtectedRoute>
+              }
+            >
+              <Route index element={<Profile />} />
+              <Route path="profile" element={<Profile />} />
+              <Route path="orders" element={<MyOrders />} />
+              <Route path="settings" element={<Settings />} />
+            </Route>
 
-          {/* Top-level protected routes (for header/menu links) */}
-          <Route
-            path="/profile"
-            element={
-              <ProtectedRoute>
-                <Profile />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/orders"
-            element={
-              <ProtectedRoute>
-                <MyOrders />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/settings"
-            element={
-              <ProtectedRoute>
-                <Settings />
-              </ProtectedRoute>
-            }
-          />
+            {/* Top-level protected routes */}
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/orders"
+              element={
+                <ProtectedRoute>
+                  <MyOrders />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
 
-          {/* Admin Routes */}
-          <Route
-            path="/admin/dashboard/*"
-            element={
-              <ProtectedRoute adminOnly={true}>
-                <AdminDashboard />
-              </ProtectedRoute>
-            }
-          />
+            {/* Admin */}
+            <Route
+              path="/admin/dashboard/*"
+              element={
+                <ProtectedRoute adminOnly={true}>
+                  <AdminDashboard />
+                </ProtectedRoute>
+              }
+            />
 
-          {/* Catch-all 404 */}
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+            {/* Catch-all */}
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
